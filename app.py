@@ -5,12 +5,18 @@ import os
 import re
 import secrets
 from datetime import datetime, timedelta, timezone
+from functools import wraps
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import qrcode
+from authlib.integrations.flask_client import OAuth
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
+from flask import (
+    Flask, abort, flash, jsonify, redirect, render_template, request,
+    send_file, session, url_for,
+)
 
 from services.github_storage import (
     GitHubStorageError,
@@ -19,6 +25,7 @@ from services.github_storage import (
     download_public_file,
     get_share_analytics,
     get_share_metadata,
+    list_user_shares,
     record_download,
     record_rejected_attempt,
     revoke_share,
@@ -34,8 +41,18 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "local-development-only-chang
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("VERCEL", "") == "1"
-# Vercel Function payloads are limited; cap application uploads at 3 MiB.
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
+# Vercel request/response payloads are limited; cap uploads at 3 MiB.
 app.config["MAX_CONTENT_LENGTH"] = max(1, min(3, int(os.getenv("MAX_CONTENT_LENGTH_MB", "3")))) * 1024 * 1024
+
+oauth = OAuth(app)
+oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile"},
+)
 
 EXPIRATION_OPTIONS = {
     "10m": ("10 minutes", timedelta(minutes=10)),
@@ -51,6 +68,64 @@ BLOCKED_EXTENSIONS = {
     ".com", ".scr", ".vbs", ".vbe", ".hta", ".jar", ".apk", ".reg",
     ".lnk", ".html", ".htm", ".js", ".mjs", ".svg", ".xhtml", ".mhtml", ".wasm",
 }
+
+
+def _safe_next_url(value: str | None) -> str | None:
+    if not value or not isinstance(value, str):
+        return None
+    parsed = urlsplit(value)
+    if parsed.scheme or parsed.netloc or not value.startswith("/") or value.startswith("//"):
+        return None
+    return value
+
+
+def _current_user() -> dict | None:
+    user = session.get("user")
+    if not isinstance(user, dict) or not user.get("sub") or not user.get("email"):
+        return None
+    return user
+
+
+def _current_owner_hash() -> str | None:
+    user = _current_user()
+    if not user:
+        return None
+    key = str(app.config["SECRET_KEY"]).encode("utf-8")
+    subject = str(user["sub"]).encode("utf-8")
+    return hmac.new(key, subject, hashlib.sha256).hexdigest()
+
+
+def _csrf_token() -> str:
+    token = session.get("_csrf_token")
+    if not isinstance(token, str) or len(token) < 32:
+        token = secrets.token_urlsafe(32)
+        session["_csrf_token"] = token
+    return token
+
+
+app.jinja_env.globals["csrf_token"] = _csrf_token
+
+
+@app.before_request
+def enforce_csrf_for_state_changes():
+    if request.method != "POST" or not _current_user():
+        return None
+    expected = session.get("_csrf_token", "")
+    supplied = request.form.get("csrf_token", "") or request.headers.get("X-CSRF-Token", "")
+    if not expected or not supplied or not hmac.compare_digest(str(expected), str(supplied)):
+        abort(400, description="The request security token is missing or invalid. Refresh the page and try again.")
+    return None
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if not _current_user():
+            if request.path.startswith("/api/"):
+                return jsonify({"error": "Sign in with Google to access this feature."}), 401
+            return redirect(url_for("login", next=request.path))
+        return view(*args, **kwargs)
+    return wrapped
 
 
 def make_share_url(share_id: str) -> str:
@@ -77,8 +152,18 @@ def _public_share_data(metadata: dict) -> dict:
         "download_count": int(metadata.get("download_count", 0)),
         "status": share_status(metadata),
         "revoked_at": metadata.get("revoked_at"),
-        "cleanup_status": metadata.get("cleanup_status", "pending"),
     }
+
+
+def _is_current_user_owner(metadata: dict) -> bool:
+    owner_hash = _current_owner_hash()
+    stored_hash = metadata.get("owner_id_hash", "")
+    return bool(
+        owner_hash
+        and isinstance(stored_hash, str)
+        and stored_hash
+        and hmac.compare_digest(owner_hash, stored_hash)
+    )
 
 
 @app.after_request
@@ -95,17 +180,65 @@ def add_security_headers(response):
 
 @app.get("/")
 def index():
-    upload_password_configured = bool(os.getenv("UPLOAD_PASSWORD", "").strip())
-    uploads_enabled = os.getenv("VERCEL", "") != "1" or upload_password_configured
-    return render_template(
-        "index.html",
-        storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"),
-        upload_protection_enabled=upload_password_configured,
-        uploads_enabled=uploads_enabled,
-    )
+    return render_template("index.html", storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"))
+
+
+@app.get("/login")
+def login():
+    if _current_user():
+        return redirect(url_for("my_shares"))
+    if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
+        flash("Google sign-in is not configured yet. The site owner must add Google OAuth credentials in Vercel.", "error")
+        return redirect(url_for("index"))
+    next_url = _safe_next_url(request.args.get("next"))
+    session["after_login"] = next_url or url_for("my_shares")
+    redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "").strip() or url_for("google_callback", _external=True)
+    return oauth.google.authorize_redirect(redirect_uri, prompt="select_account")
+
+
+@app.get("/auth/google/callback")
+def google_callback():
+    if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
+        flash("Google sign-in is not configured.", "error")
+        return redirect(url_for("index"))
+    try:
+        token = oauth.google.authorize_access_token()
+        userinfo = token.get("userinfo")
+        if not userinfo:
+            userinfo = oauth.google.userinfo(token=token)
+        subject = str(userinfo.get("sub", "")).strip()
+        email = str(userinfo.get("email", "")).strip().lower()
+        verified = userinfo.get("email_verified") is True
+        if not subject or not email or not verified:
+            flash("Google did not return a verified email address. Please try a verified Google account.", "error")
+            return redirect(url_for("index"))
+        next_url = _safe_next_url(session.get("after_login")) or url_for("my_shares")
+        user = {
+            "sub": subject,
+            "email": email,
+            "name": str(userinfo.get("name") or email.split("@")[0])[:120],
+            "picture": str(userinfo.get("picture") or "")[:1000],
+        }
+        # Replace the pre-auth session to reduce session-fixation risk.
+        session.clear()
+        session["user"] = user
+        flash(f"Signed in as {email}.", "success")
+        return redirect(next_url)
+    except Exception:
+        app.logger.warning("Google sign-in failed", exc_info=True)
+        flash("Google sign-in could not be completed. Please try again.", "error")
+        return redirect(url_for("index"))
+
+
+@app.get("/logout")
+def logout():
+    session.clear()
+    flash("You have been signed out.", "success")
+    return redirect(url_for("index"))
 
 
 @app.get("/my-shares")
+@login_required
 def my_shares():
     return render_template("my_shares.html")
 
@@ -116,13 +249,13 @@ def health():
 
 
 @app.post("/upload")
+@login_required
 def upload():
     uploaded = request.files.get("file")
     if uploaded is None or not uploaded.filename:
         flash("Choose a file before uploading.", "error")
         return redirect(url_for("index"))
 
-    # Only small, non-sensitive demo files should ever enter the public repo.
     original_name = uploaded.filename.replace("\\", "/").split("/")[-1].strip()[:200]
     if not original_name:
         flash("The uploaded filename is invalid.", "error")
@@ -134,20 +267,6 @@ def upload():
         return redirect(url_for("index"))
     if suffix and not EXTENSION_PATTERN.fullmatch(suffix):
         flash("The file extension is invalid.", "error")
-        return redirect(url_for("index"))
-
-    configured_upload_password = os.getenv("UPLOAD_PASSWORD", "").strip()
-    if os.getenv("VERCEL", "") == "1" and not configured_upload_password:
-        return render_template(
-            "error.html",
-            title="Uploads are temporarily disabled",
-            message="The site owner must configure UPLOAD_PASSWORD in Vercel Environment Variables before new uploads can be accepted.",
-        ), 503
-    if configured_upload_password and not hmac.compare_digest(
-        request.form.get("upload_password", ""),
-        configured_upload_password,
-    ):
-        flash("The creator passcode is incorrect.", "error")
         return redirect(url_for("index"))
 
     expiry_choice = request.form.get("expiry", "24h")
@@ -171,8 +290,12 @@ def upload():
         flash("The selected file is too large. The maximum is 3 MB.", "error")
         return redirect(url_for("index"))
 
+    user = _current_user()
+    owner_id_hash = _current_owner_hash()
+    if not user or not owner_id_hash:
+        return redirect(url_for("login"))
+
     share_id = secrets.token_hex(16)
-    owner_token = secrets.token_urlsafe(32)
     storage_path = f"files/{share_id}{suffix or '.bin'}"
     label, duration = EXPIRATION_OPTIONS[expiry_choice]
     now = datetime.now(timezone.utc)
@@ -186,7 +309,7 @@ def upload():
         "max_downloads": max_downloads,
         "download_count": 0,
         "downloads": [],
-        "owner_token_hash": hashlib.sha256(owner_token.encode("utf-8")).hexdigest(),
+        "owner_id_hash": owner_id_hash,
         "revoked": False,
         "cleanup_status": "pending",
     }
@@ -203,9 +326,6 @@ def upload():
         flash("The file may have reached GitHub, but its metadata could not be saved. Check the storage repository before retrying.", "error")
         return redirect(url_for("index"))
 
-    # Deliver the one-time owner token to the browser through a short redirect
-    # session. It is never placed in the public share URL.
-    session["quickshare_created"] = {"share_id": share_id, "owner_token": owner_token}
     flash(f"File uploaded. Sharing link expires in {label}.", "success")
     return redirect(url_for("share_page", share_id=share_id), code=303)
 
@@ -217,20 +337,13 @@ def share_page(share_id: str):
     file_record = get_share_metadata(share_id)
     if not file_record:
         abort(404)
-    created = session.get("quickshare_created", {})
-    owner_token = None
-    if created.get("share_id") == share_id:
-        owner_token = created.get("owner_token")
-        session.pop("quickshare_created", None)
-    status = share_status(file_record)
-    error = request.args.get("error", "")
     return render_template(
         "share.html",
         file=file_record,
-        status=status,
-        error=error,
+        status=share_status(file_record),
+        error=request.args.get("error", ""),
         share_url=make_share_url(share_id),
-        owner_token=owner_token,
+        is_owner=_is_current_user_owner(file_record),
     )
 
 
@@ -291,29 +404,40 @@ def api_share(share_id: str):
     return jsonify(_public_share_data(metadata))
 
 
+@app.get("/api/my-shares")
+@login_required
+def api_my_shares():
+    try:
+        shares = list_user_shares(_current_owner_hash() or "")
+    except GitHubStorageError as exc:
+        app.logger.warning("Could not list account shares: %s", exc)
+        return jsonify({"error": "Share list is temporarily unavailable. Refresh in a moment."}), 503
+    return jsonify({"shares": shares})
+
+
 @app.post("/api/shares/<share_id>/analytics")
+@login_required
 def api_share_analytics(share_id: str):
     if not SHARE_ID_PATTERN.fullmatch(share_id):
         abort(404)
-    body = request.get_json(silent=True) or {}
-    result, analytics = get_share_analytics(share_id, body.get("owner_token", ""))
+    result, analytics = get_share_analytics(share_id, _current_owner_hash() or "")
     if result == "not_found":
         return jsonify({"error": "Share not found"}), 404
     if result == "unauthorized":
-        return jsonify({"error": "Management token is invalid"}), 403
+        return jsonify({"error": "This share belongs to another account."}), 403
     return jsonify(analytics)
 
 
 @app.post("/api/shares/<share_id>/revoke")
+@login_required
 def api_revoke_share(share_id: str):
     if not SHARE_ID_PATTERN.fullmatch(share_id):
         abort(404)
-    body = request.get_json(silent=True) or {}
-    result = revoke_share(share_id, body.get("owner_token", ""))
+    result = revoke_share(share_id, _current_owner_hash() or "")
     if result == "not_found":
         return jsonify({"error": "Share not found"}), 404
     if result == "unauthorized":
-        return jsonify({"error": "Management token is invalid"}), 403
+        return jsonify({"error": "This share belongs to another account."}), 403
     if result == "conflict":
         return jsonify({"error": "The share changed concurrently. Please retry."}), 409
     if result in {"success", "revoked"}:
