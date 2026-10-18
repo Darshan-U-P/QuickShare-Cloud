@@ -1,5 +1,4 @@
 import base64
-import hashlib
 import hmac
 import json
 import os
@@ -174,14 +173,14 @@ def share_status(metadata: dict, now: datetime | None = None) -> str:
         raise GitHubStorageError("The saved share metadata is missing required fields.")
 
 
-def _valid_owner_token(metadata: dict, owner_token: str) -> bool:
-    if not owner_token or not isinstance(owner_token, str):
+def _valid_owner_id(metadata: dict, owner_id_hash: str) -> bool:
+    if not isinstance(owner_id_hash, str) or not owner_id_hash:
         return False
-    saved_hash = metadata.get("owner_token_hash", "")
-    if not saved_hash:
+    saved_hash = metadata.get("owner_id_hash", "")
+    if not isinstance(saved_hash, str) or not saved_hash:
         return False
-    candidate = hashlib.sha256(owner_token.encode("utf-8")).hexdigest()
-    return hmac.compare_digest(saved_hash, candidate)
+    return hmac.compare_digest(saved_hash, owner_id_hash)
+
 
 
 def _append_event(metadata: dict, status: str, now: datetime | None = None):
@@ -232,9 +231,9 @@ def record_rejected_attempt(share_id: str, status: str) -> None:
     _write_metadata(share_id, mutate, f"Record denied QuickShare access {share_id}", attempts=2)
 
 
-def revoke_share(share_id: str, owner_token: str) -> str:
+def revoke_share(share_id: str, owner_id_hash: str) -> str:
     def mutate(metadata):
-        if not _valid_owner_token(metadata, owner_token):
+        if not _valid_owner_id(metadata, owner_id_hash):
             return "unauthorized"
         if metadata.get("revoked"):
             return "revoked"
@@ -242,17 +241,18 @@ def revoke_share(share_id: str, owner_token: str) -> str:
         metadata["revoked_at"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
         _append_event(metadata, "revoked")
         return "write"
+
     result, _metadata = _write_metadata(
         share_id, mutate, f"Revoke QuickShare share {share_id}", attempts=3
     )
     return result
 
 
-def get_share_analytics(share_id: str, owner_token: str) -> tuple[str, dict | None]:
+def get_share_analytics(share_id: str, owner_id_hash: str) -> tuple[str, dict | None]:
     metadata = get_share_metadata(share_id)
     if not metadata:
         return "not_found", None
-    if not _valid_owner_token(metadata, owner_token):
+    if not _valid_owner_id(metadata, owner_id_hash):
         return "unauthorized", None
     events = metadata.get("downloads", [])
     if not isinstance(events, list):
@@ -278,6 +278,39 @@ def get_share_analytics(share_id: str, owner_token: str) -> tuple[str, dict | No
         "downloads": safe_events,
     }
 
+
+def list_user_shares(owner_id_hash: str) -> list[dict]:
+    """Return metadata for shares owned by one authenticated account."""
+    if not isinstance(owner_id_hash, str) or not owner_id_hash:
+        return []
+    shares = []
+    for share_id in _list_metadata_names():
+        metadata = get_share_metadata(share_id)
+        if not metadata or not _valid_owner_id(metadata, owner_id_hash):
+            continue
+        events = metadata.get("downloads", [])
+        if not isinstance(events, list):
+            events = []
+        safe_events = [
+            {"time": str(event.get("time", "")), "status": str(event.get("status", "unknown"))}
+            for event in events[-100:]
+            if isinstance(event, dict)
+        ]
+        shares.append({
+            "share_id": metadata.get("share_id", share_id),
+            "original_filename": metadata.get("original_filename", "Unnamed file"),
+            "file_size": int(metadata.get("file_size", 0)),
+            "upload_time": metadata.get("upload_time", ""),
+            "expiry_time": metadata.get("expiry_time", ""),
+            "max_downloads": int(metadata.get("max_downloads", 0)),
+            "download_count": int(metadata.get("download_count", 0)),
+            "status": share_status(metadata),
+            "revoked_at": metadata.get("revoked_at"),
+            "cleanup_status": metadata.get("cleanup_status", "pending"),
+            "downloads": safe_events,
+        })
+    shares.sort(key=lambda row: row.get("upload_time", ""), reverse=True)
+    return shares[:200]
 
 def _list_metadata_names() -> list[str]:
     token, owner, repo, branch = _settings()
