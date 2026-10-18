@@ -397,3 +397,23 @@ input[type="password"]::placeholder { color: #7182a3; }
 .upload-disabled strong { display: block; color: #f3d69b; font-size: 12px; }
 .upload-disabled p { margin: 7px 0 0; color: #c6b48e; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
 .upload-disabled code { color: #f3d69b; }
+
+
+/* Google account experience */
+.account-chip { display: inline-flex; align-items: center; gap: 8px; min-width: 0; max-width: 210px; padding: 5px 10px 5px 5px; border: 1px solid rgba(146,169,216,.15); border-radius: 999px; color: #cbd7ee; background: rgba(11,19,36,.65); }
+.account-avatar { display: grid; place-items: center; width: 27px; height: 27px; flex: 0 0 auto; border-radius: 50%; color: #071322; background: linear-gradient(135deg, #a3b7ff, #79ead7); font-size: 11px; font-weight: 900; }
+.account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 145px; font-size: 10px; font-weight: 700; }
+.google-login-cta { gap: 9px; }
+.google-g { display: inline-grid; place-items: center; width: 20px; height: 20px; flex: 0 0 auto; border-radius: 50%; color: #4285f4; background: #fff; font-family: Arial, sans-serif; font-size: 13px; font-weight: 900; }
+.login-gate { display: grid; justify-items: start; text-align: left; padding: 23px; border: 1px solid rgba(145,170,255,.2); border-radius: 15px; background: linear-gradient(140deg, rgba(82,106,201,.08), rgba(60,192,180,.035)); }
+.login-gate-icon { display: grid; place-items: center; width: 46px; height: 46px; margin-bottom: 15px; border: 1px solid rgba(146,169,216,.15); border-radius: 14px; color: #4285f4; background: #fff; font-family: Arial, sans-serif; font-size: 25px; font-weight: 900; }
+.login-gate h3 { margin: 0 0 8px; font-size: 17px; letter-spacing: -.4px; }
+.login-gate p { margin: 0 0 18px; color: #9baaca; font-size: 11px; line-height: 1.8; }
+.btn-google { width: 100%; justify-content: flex-start; padding: 13px 14px; color: #182239; background: #f8faff; border-color: #e5eaf6; }
+.btn-google:hover { background: #eaf0ff; }
+.btn-google .btn-arrow { color: #65769b; }
+.login-gate-foot { margin-top: 12px; color: #7183a4; font-size: 9px; line-height: 1.5; }
+@media (max-width: 700px) {
+  .account-chip { display: none; }
+  .google-login-cta { padding: 9px 10px; font-size: 10px; }
+}
