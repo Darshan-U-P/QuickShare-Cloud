@@ -1,74 +1,106 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Share file · QuickShare Cloud</title>
-  <style>
-    :root { color-scheme: dark; font-family: Inter, system-ui, Segoe UI, sans-serif; }
-    * { box-sizing: border-box; }
-    body { margin: 0; min-height: 100vh; color: #edf2ff; background: radial-gradient(circle at 12% 0%, #1b2a57 0, #0c1225 42%, #090d18 100%); }
-    main { width: min(760px, 92vw); margin: 0 auto; padding: 45px 0 60px; }
-    a { color: #a9bdff; }
-    .brand { font-weight: 800; margin-bottom: 45px; }
-    .panel { padding: clamp(22px, 5vw, 36px); border: 1px solid #293656; border-radius: 22px; background: #111a2ce8; text-align: center; }
-    h1 { margin: 10px 0; overflow-wrap: anywhere; font-size: clamp(26px, 5vw, 38px); }
-    p { color: #aab6d0; line-height: 1.65; }
-    .qr { background: white; border-radius: 14px; display: inline-block; padding: 12px; margin: 20px 0; max-width: 100%; }
-    .qr img { display: block; width: 220px; max-width: 100%; height: auto; }
-    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 20px 0; text-align: left; }
-    .item { background: #0b1323; border: 1px solid #263452; border-radius: 12px; padding: 14px; overflow-wrap: anywhere; }
-    .label { font-size: 11px; color: #8fa0c1; text-transform: uppercase; letter-spacing: 1px; }
-    .value { margin-top: 7px; font-size: 14px; font-weight: 700; }
-    .button { display: inline-block; border: 0; border-radius: 11px; padding: 13px 18px; background: linear-gradient(135deg, #8ca7ff, #6ee7d2); color: #081222; font-weight: 800; text-decoration: none; margin: 8px 5px; }
-    .button.secondary { background: #1a2740; color: #e1e9ff; border: 1px solid #35476b; }
-    .warning, .error { margin-top: 16px; border-radius: 11px; padding: 12px; font-size: 13px; }
-    .warning { background: #30291d; color: #f4dfb2; border: 1px solid #5b4a2c; }
-    .error { background: #351b26; color: #ffd9de; border: 1px solid #884650; }
-  </style>
-</head>
-<body>
-  <main>
-    <div class="brand">↗ QuickShare Cloud</div>
-    <section class="panel">
+{% extends "base.html" %}
+{% block title %}{{ file.original_filename }} · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="share-page">
+  <a class="back-link" href="{{ url_for('index') }}"><span aria-hidden="true">←</span> Back to QuickShare</a>
+
+  <div class="share-head">
+    <div>
+      <div class="section-kicker">YOUR SHARE SPACE</div>
       {% if status == "active" %}
-        <p>YOUR SHARE PAGE</p>
-        <h1>{{ file.original_filename }}</h1>
-        <p>Scan the QR code or use the link to download this file.</p>
+        <h1>Ready to <span>share.</span></h1>
+        <p>Your file is uploaded. Share the link or let someone scan the QR code.</p>
       {% elif status == "expired" %}
-        <h1>Link expired</h1>
-        <p>This share is past its expiration time.</p>
-      {% else %}
-        <h1>Download limit reached</h1>
+        <h1>This link has <span>expired.</span></h1>
+        <p>The expiry time has passed. Create a new share from the home page to make the file available again.</p>
+      {% elif status == "limit" %}
+        <h1>Share limit <span>reached.</span></h1>
         <p>This file has reached its configured number of successful downloads.</p>
+      {% else %}
+        <h1>Share status <span>unavailable.</span></h1>
+        <p>We couldn't verify this share. Please return home and try again.</p>
       {% endif %}
+    </div>
+    {% if status == "active" %}
+      <span class="status-pill status-active"><i></i> Link active</span>
+    {% elif status == "expired" %}
+      <span class="status-pill status-expired"><i></i> Expired</span>
+    {% elif status == "limit" %}
+      <span class="status-pill status-limit"><i></i> Limit reached</span>
+    {% else %}
+      <span class="status-pill status-expired"><i></i> Unavailable</span>
+    {% endif %}
+  </div>
 
-      {% if error == "expired" %}
-        <div class="error">This sharing link has expired.</div>
-      {% elif error == "limit" %}
-        <div class="error">The maximum number of successful downloads has been reached.</div>
-      {% elif error == "storage" %}
-        <div class="error">The file could not be retrieved from GitHub storage. Check connectivity and repository status.</div>
-      {% elif error == "not_found" %}
-        <div class="error">The share could not be found.</div>
-      {% endif %}
+  {% if error == "expired" %}
+    <div class="inline-alert alert-warning"><span aria-hidden="true">◷</span><span>This sharing link has expired.</span></div>
+  {% elif error == "limit" %}
+    <div class="inline-alert alert-warning"><span aria-hidden="true">⇩</span><span>The maximum number of successful downloads has been reached.</span></div>
+  {% elif error == "storage" %}
+    <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The file could not be retrieved from GitHub storage. Check connectivity and try again.</span></div>
+  {% elif error == "not_found" %}
+    <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The share could not be found.</span></div>
+  {% elif error == "conflict" %}
+    <div class="inline-alert alert-warning"><span aria-hidden="true">↻</span><span>Another request updated the share at the same time. Please retry the download.</span></div>
+  {% endif %}
+
+  <div class="share-layout">
+    <section class="card file-card">
+      <div class="file-card-top">
+        <span class="large-file-icon" aria-hidden="true">
+          <svg viewBox="0 0 44 52" fill="none"><path d="M8 2h18l12 12v33a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M26 2v13h12M12 28h18M12 35h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </span>
+        <div class="file-heading">
+          <span class="section-kicker">SHARED FILE</span>
+          <h2 title="{{ file.original_filename }}">{{ file.original_filename }}</h2>
+          <p>{{ "%.2f"|format(file.file_size / 1024) }} KB <span class="meta-dot">•</span> Uploaded <time data-format-date datetime="{{ file.upload_time }}">{{ file.upload_time }}</time></p>
+        </div>
+      </div>
 
       {% if status == "active" %}
-        <div class="qr"><img src="{{ url_for('qr_image', share_id=file.share_id) }}" alt="QR code for this share"></div>
-        <div>
-          <a class="button" href="{{ url_for('download', share_id=file.share_id) }}">Download file</a>
-          <a class="button secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download>Download QR code</a>
+        <div class="share-url-block">
+          <label for="share-url">Your share link</label>
+          <div class="copy-row">
+            <input id="share-url" type="text" value="{{ share_url }}" readonly aria-label="Share URL">
+            <button class="btn btn-copy" type="button" data-copy-target="share-url"><span aria-hidden="true">▢</span> Copy link</button>
+          </div>
+          <p class="microcopy" id="copy-hint">Anyone with this link can open the share page.</p>
+        </div>
+
+        <div class="file-actions">
+          <a class="btn btn-primary action-download" href="{{ url_for('download', share_id=file.share_id) }}"><span aria-hidden="true">↓</span> Download file <span class="btn-arrow" aria-hidden="true">↗</span></a>
+          <a class="btn btn-secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download><span aria-hidden="true">▦</span> Save QR code</a>
+        </div>
+      {% else %}
+        <div class="share-unavailable">
+          <span class="unavailable-icon" aria-hidden="true">{% if status == "expired" %}◷{% else %}✓{% endif %}</span>
+          <div><strong>{% if status == "expired" %}This share is no longer active{% elif status == "limit" %}All downloads used{% else %}This share is unavailable{% endif %}</strong><p>Go back to QuickShare to upload a file and create a new link.</p></div>
+          <a class="btn btn-secondary" href="{{ url_for('index') }}">Create a new share</a>
         </div>
       {% endif %}
-
-      <div class="meta">
-        <div class="item"><div class="label">File size</div><div class="value">{{ "%.2f"|format(file.file_size / 1024) }} KB</div></div>
-        <div class="item"><div class="label">Successful downloads</div><div class="value">{{ file.download_count }} / {{ file.max_downloads }}</div></div>
-        <div class="item"><div class="label">Expires (UTC)</div><div class="value">{{ file.expiry_time.replace("T", " ") }}</div></div>
-      </div>
-      <p class="warning">Public storage warning: this repository is public. App-level expiry and download limits do not prevent someone from accessing the file directly through GitHub. Do not share sensitive files.</p>
-      <p><a href="{{ url_for('index') }}">← Back to QuickShare</a></p>
     </section>
-  </main>
-</body>
-</html>
+
+    <aside class="card qr-card">
+      <div class="qr-card-heading">
+        <div><div class="section-kicker">SCAN TO OPEN</div><h2>Share with a scan</h2></div>
+        <span class="qr-badge" aria-hidden="true">⌗</span>
+      </div>
+      {% if status == "active" %}
+        <div class="qr-frame"><img src="{{ url_for('qr_image', share_id=file.share_id) }}" alt="QR code that opens this file's share page"></div>
+        <p class="qr-caption">Open your camera, scan this code, and tap the link to access the share page.</p>
+        <a class="download-qr-link" href="{{ url_for('qr_image', share_id=file.share_id) }}" download>Download QR image <span aria-hidden="true">↗</span></a>
+      {% else %}
+        <div class="qr-disabled"><span aria-hidden="true">▦</span><p>QR sharing is disabled because this link is no longer active.</p></div>
+      {% endif %}
+    </aside>
+  </div>
+
+  <section class="share-metrics">
+    <article class="metric-card"><span class="metric-icon metric-blue" aria-hidden="true">⇩</span><div><span class="metric-label">DOWNLOADS USED</span><strong>{{ file.download_count }} <small>/ {{ file.max_downloads }}</small></strong><span class="metric-foot">{{ file.max_downloads - file.download_count if file.max_downloads > file.download_count else 0 }} remaining</span></div></article>
+    <article class="metric-card"><span class="metric-icon metric-mint" aria-hidden="true">◷</span><div><span class="metric-label">LINK EXPIRY</span><strong><time data-format-date datetime="{{ file.expiry_time }}">{{ file.expiry_time }}</time></strong><span class="metric-foot">Displayed in your local time</span></div></article>
+    <article class="metric-card"><span class="metric-icon metric-violet" aria-hidden="true">↗</span><div><span class="metric-label">SHARE ID</span><strong class="share-id">{{ file.share_id[:8] }}…</strong><span class="metric-foot">Unique file reference</span></div></article>
+  </section>
+
+  <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>About public storage</strong><p>This prototype stores files and share metadata in a public GitHub repository. Link expiry and download limits apply only through QuickShare; direct GitHub access may bypass them. Never upload sensitive files.</p></div></div>
+</section>
+{% endblock %}
