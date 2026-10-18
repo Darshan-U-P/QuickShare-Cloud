@@ -34,8 +34,9 @@ Vercel detects the Flask app from root-level `app.py`. Set these Production Envi
 - `CRON_SECRET` = a random secret with at least 16 characters
 - `FLASK_DEBUG` = `0`
 - `MAX_CONTENT_LENGTH_MB` = `3`
+- `UPLOAD_PASSWORD` = a long random passphrase known only to trusted uploaders
 
-The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Cron calls this endpoint using the `Authorization: Bearer <CRON_SECRET>` header. Hobby schedules run once per day and are not guaranteed to fire at the exact minute. After adding `CRON_SECRET`, redeploy so the function and cron configuration are refreshed.
+The public upload endpoint is disabled on Vercel unless `UPLOAD_PASSWORD` is set. If configured, the upload form requires that passphrase; give it only to trusted uploaders. The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Cron calls this endpoint using the `Authorization: Bearer <CRON_SECRET>` header. Hobby schedules run once per day and are not guaranteed to fire at the exact minute. After adding `CRON_SECRET`, redeploy so the function and cron configuration are refreshed.
 
 ## My Shares and owner controls
 
