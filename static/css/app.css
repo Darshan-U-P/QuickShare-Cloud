@@ -241,7 +241,7 @@ h1, h2, h3, p { margin-top: 0; }
   .brand-mark { width: 37px; height: 37px; border-radius: 12px; }
   .brand-copy { font-size: 15px; }
   .top-nav { gap: 13px; font-size: 11px; }
-  .top-nav > a:not(.nav-cta) { display: none; }
+  .top-nav > a[href*="how-it-works"] { display: none; }
   .nav-cta { padding: 10px 11px; gap: 7px; }
   .hero { grid-template-columns: 1fr; gap: 30px; padding: 44px 0 42px; }
   .hero h1 { font-size: clamp(42px, 12vw, 60px); letter-spacing: -2.7px; }
