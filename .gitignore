@@ -1,0 +1,9 @@
+.venv/
+venv/
+.env
+__pycache__/
+*.py[cod]
+instance/*.db
+storage/
+.pytest_cache/
+.coverage
