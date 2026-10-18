@@ -58,7 +58,11 @@
           <a class="btn btn-primary action-download" href="{{ url_for('download', share_id=file.share_id) }}"><span aria-hidden="true">↓</span> Download file <span class="btn-arrow" aria-hidden="true">↗</span></a>
           <a class="btn btn-secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download><span aria-hidden="true">▦</span> Save QR code</a>
         </div>
-        <div class="owner-actions"><span class="owner-hint" id="owner-hint">Share owner controls are available in the browser that created this share.</span><button class="btn btn-danger" type="button" id="revoke-current-share" data-share-id="{{ file.share_id }}" hidden>Revoke this link</button></div>
+        {% if is_owner %}
+        <div class="owner-actions"><span class="owner-hint" id="owner-hint">You're signed in as the owner of this share.</span><button class="btn btn-danger" type="button" id="revoke-current-share" data-share-id="{{ file.share_id }}">Revoke this link</button></div>
+        {% else %}
+        <div class="owner-actions"><span class="owner-hint">Only the Google account that created this share can revoke it.</span></div>
+        {% endif %}
       {% else %}
         <div class="share-unavailable">
           <span class="unavailable-icon" aria-hidden="true">{% if status == "expired" %}◷{% elif status == "revoked" %}⊘{% else %}✓{% endif %}</span>
@@ -87,12 +91,5 @@
   <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>About public storage</strong><p>This prototype stores files and share metadata in a public GitHub repository. Link expiry and download limits apply only through QuickShare; direct GitHub access may bypass them. Revocation blocks QuickShare downloads; cleanup removes the current-branch file but cannot erase Git history. Never upload sensitive files.</p></div></div>
 </section>
 
-{% if owner_token %}
-<script id="quickshare-created-share" type="application/json">{{ {
-  "share_id": file.share_id,
-  "owner_token": owner_token,
-  "filename": file.original_filename,
-  "upload_time": file.upload_time
-}|tojson }}</script>
-{% endif %}
+
 {% endblock %}
