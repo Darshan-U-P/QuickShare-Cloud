@@ -59,12 +59,12 @@ def test_github_rate_limit_is_reported_clearly():
 
 
 def test_only_owner_token_can_revoke_share(monkeypatch):
-    owner_token = "owner-token-for-this-test"
+    owner_id_hash = "google-subject-hash-for-this-test"
     share_id = "b" * 32
     state = {
         "metadata": {
             "share_id": share_id,
-            "owner_token_hash": hashlib.sha256(owner_token.encode()).hexdigest(),
+            "owner_id_hash": owner_id_hash,
             "revoked": False,
             "expiry_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             "max_downloads": 3,
@@ -90,9 +90,9 @@ def test_only_owner_token_can_revoke_share(monkeypatch):
     monkeypatch.setattr(storage, "_get_json_file", fake_get)
     monkeypatch.setattr(storage, "_put_contents", fake_put)
 
-    assert storage.revoke_share(share_id, "wrong-token") == "unauthorized"
+    assert storage.revoke_share(share_id, "other-account-hash") == "unauthorized"
     assert state["metadata"]["revoked"] is False
-    assert storage.revoke_share(share_id, owner_token) == "success"
+    assert storage.revoke_share(share_id, owner_id_hash) == "success"
     assert state["metadata"]["revoked"] is True
     assert storage.share_status(state["metadata"]) == "revoked"
 
@@ -103,7 +103,7 @@ def test_concurrent_downloads_never_exceed_limit(monkeypatch):
     state = {
         "metadata": {
             "share_id": share_id,
-            "owner_token_hash": "unused",
+            "owner_id_hash": "unused",
             "revoked": False,
             "expiry_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
             "max_downloads": limit,
@@ -168,3 +168,42 @@ def test_cleanup_deletes_expired_current_revision_and_marks_metadata(monkeypatch
     assert summary["deleted"] == 1
     assert current["cleanup_status"] == "deleted"
     assert current["cleanup_at"]
+
+
+
+def test_list_user_shares_only_returns_matching_account(monkeypatch):
+    target_hash = "account-one-hash"
+    records = {
+        "1" * 32: {
+            "share_id": "1" * 32,
+            "owner_id_hash": target_hash,
+            "original_filename": "mine.pdf",
+            "storage_path": "files/mine.pdf",
+            "upload_time": "2026-10-18T10:00:00+00:00",
+            "expiry_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "file_size": 1234,
+            "max_downloads": 3,
+            "download_count": 1,
+            "downloads": [{"time": "2026-10-18T10:01:00+00:00", "status": "success"}],
+            "revoked": False,
+        },
+        "2" * 32: {
+            "share_id": "2" * 32,
+            "owner_id_hash": "account-two-hash",
+            "original_filename": "someone-elses.pdf",
+            "storage_path": "files/other.pdf",
+            "upload_time": "2026-10-18T11:00:00+00:00",
+            "expiry_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+            "file_size": 987,
+            "max_downloads": 3,
+            "download_count": 0,
+            "downloads": [],
+            "revoked": False,
+        },
+    }
+    monkeypatch.setattr(storage, "_list_metadata_names", lambda: list(records))
+    monkeypatch.setattr(storage, "get_share_metadata", lambda share_id: records.get(share_id))
+    shares = storage.list_user_shares(target_hash)
+    assert len(shares) == 1
+    assert shares[0]["original_filename"] == "mine.pdf"
+    assert "owner_id_hash" not in shares[0]
