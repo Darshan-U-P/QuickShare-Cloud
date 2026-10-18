@@ -1,29 +1,42 @@
 # QuickShare Cloud
 
-A college mini-project demonstrating QR-code-based file sharing, expiry enforcement, download limits, and GitHub-backed storage.
+A college Cloud Computing mini-project: QR-code-based file sharing with expiring links, download limits, and GitHub-backed storage.
 
 ## Current implementation
 
-- Flask home page and health endpoint.
-- File upload to the configured GitHub repository through the GitHub Contents API.
-- SQLite metadata and download activity records.
-- QR-code generation for each share page.
-- Expiration checks and server-side download limits.
-- A 5 MB default upload cap (configurable through `MAX_CONTENT_LENGTH_MB`).
+- Flask web application with a health endpoint.
+- File uploads stored in the separate GitHub repository using the GitHub Contents API.
+- Persistent share metadata stored as JSON files in that same GitHub repository, so state survives Vercel serverless invocations.
+- QR-code generation, expiring links, download limits, and a bounded list of recent successful/denied attempts.
+- A 3 MB maximum upload size to leave room under Vercel Functions' 4.5 MB request/response body limit.
 
 ## Local setup
 
-1. Create and activate a virtual environment.
+1. Create and activate a Python virtual environment.
 2. Install dependencies: `pip install -r requirements.txt`.
-3. Copy `.env.example` to `.env` and configure your token and repository.
+3. Copy `.env.example` to `.env` and set your GitHub token and storage repository values.
 4. Run `python app.py`.
 
-Never commit `.env`. A fine-grained GitHub token should be limited to the `QuickShare-Storage` repository and have Contents: Read and write permission.
+Never commit `.env`. Use a fine-grained token restricted to the `QuickShare-Storage` repository with Contents: Read and write permission. When deploying to Vercel, add the same variables under Project Settings → Environment Variables; never upload the token to your application repository.
 
-## Critical storage limitation
+## Deploying to Vercel
 
-The storage repository is public. All files there must be treated as public and non-sensitive. App-level expiration and download limits only protect requests made through QuickShare; they do not prevent direct access to the public repository. Deleting a file from the current branch does not guarantee erasure from Git history. This is a learning prototype, not production-grade private file storage.
+Vercel detects a Flask app exported as `app` from root-level `app.py`, so no custom start command is needed for the basic deployment. Connect this repository to Vercel, keep the Hobby plan for this personal college project, and set these environment variables:
 
-## Local-only network behavior
+- `GITHUB_TOKEN`
+- `GITHUB_OWNER` = `Darshan-U-P`
+- `GITHUB_REPO` = `QuickShare-Storage`
+- `GITHUB_BRANCH` = `main`
+- `SECRET_KEY` = a new random value
+- `FLASK_DEBUG` = `0`
+- `MAX_CONTENT_LENGTH_MB` = `3`
 
-Flask binds to `127.0.0.1` for local development. A QR code generated with this base address will work on the same computer only. For access from another device, configure a reachable base URL and a deliberate network binding/firewall rule. Do not expose Flask's debug server directly to the public internet.
+Leave `PUBLIC_BASE_URL` empty initially; the share link is based on the incoming request host. After deployment, test the production URL and generate a new QR code there. Old QR codes created on localhost still point to localhost.
+
+## Public storage warning
+
+The GitHub repository is public, including uploaded files and JSON metadata. Do not upload sensitive files. App-level expiration and download limits do not block direct access to the public GitHub URLs. Deleting a file from the latest revision does not guarantee erasure from Git history. GitHub's Contents API is not a database; SHA-conflict retries help for a low-traffic demo, but this is not suitable as a production transactional store.
+
+## Notes
+
+Vercel Functions have a read-only filesystem apart from temporary storage, so this app does not rely on local SQLite for persistent share metadata. Vercel also limits request and response bodies to 4.5 MB; the app's 3 MB cap leaves room for multipart overhead.
