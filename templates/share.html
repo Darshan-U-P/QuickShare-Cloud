@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Share file · QuickShare Cloud</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, Segoe UI, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: #edf2ff; background: radial-gradient(circle at 12% 0%, #1b2a57 0, #0c1225 42%, #090d18 100%); }
+    main { width: min(760px, 92vw); margin: 0 auto; padding: 45px 0 60px; }
+    a { color: #a9bdff; }
+    .brand { font-weight: 800; margin-bottom: 45px; }
+    .panel { padding: clamp(22px, 5vw, 36px); border: 1px solid #293656; border-radius: 22px; background: #111a2ce8; text-align: center; }
+    h1 { margin: 10px 0; overflow-wrap: anywhere; font-size: clamp(26px, 5vw, 38px); }
+    p { color: #aab6d0; line-height: 1.65; }
+    .qr { background: white; border-radius: 14px; display: inline-block; padding: 12px; margin: 20px 0; max-width: 100%; }
+    .qr img { display: block; width: 220px; max-width: 100%; height: auto; }
+    .meta { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 20px 0; text-align: left; }
+    .item { background: #0b1323; border: 1px solid #263452; border-radius: 12px; padding: 14px; overflow-wrap: anywhere; }
+    .label { font-size: 11px; color: #8fa0c1; text-transform: uppercase; letter-spacing: 1px; }
+    .value { margin-top: 7px; font-size: 14px; font-weight: 700; }
+    .button { display: inline-block; border: 0; border-radius: 11px; padding: 13px 18px; background: linear-gradient(135deg, #8ca7ff, #6ee7d2); color: #081222; font-weight: 800; text-decoration: none; margin: 8px 5px; }
+    .button.secondary { background: #1a2740; color: #e1e9ff; border: 1px solid #35476b; }
+    .warning, .error { margin-top: 16px; border-radius: 11px; padding: 12px; font-size: 13px; }
+    .warning { background: #30291d; color: #f4dfb2; border: 1px solid #5b4a2c; }
+    .error { background: #351b26; color: #ffd9de; border: 1px solid #884650; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand">↗ QuickShare Cloud</div>
+    <section class="panel">
+      {% if status == "active" %}
+        <p>YOUR SHARE PAGE</p>
+        <h1>{{ file.original_filename }}</h1>
+        <p>Scan the QR code or use the link to download this file.</p>
+      {% elif status == "expired" %}
+        <h1>Link expired</h1>
+        <p>This share is past its expiration time.</p>
+      {% else %}
+        <h1>Download limit reached</h1>
+        <p>This file has reached its configured number of successful downloads.</p>
+      {% endif %}
+
+      {% if error == "expired" %}
+        <div class="error">This sharing link has expired.</div>
+      {% elif error == "limit" %}
+        <div class="error">The maximum number of successful downloads has been reached.</div>
+      {% elif error == "storage" %}
+        <div class="error">The file could not be retrieved from GitHub storage. Check connectivity and repository status.</div>
+      {% elif error == "not_found" %}
+        <div class="error">The share could not be found.</div>
+      {% endif %}
+
+      {% if status == "active" %}
+        <div class="qr"><img src="{{ url_for('qr_image', share_id=file.share_id) }}" alt="QR code for this share"></div>
+        <div>
+          <a class="button" href="{{ url_for('download', share_id=file.share_id) }}">Download file</a>
+          <a class="button secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download>Download QR code</a>
+        </div>
+      {% endif %}
+
+      <div class="meta">
+        <div class="item"><div class="label">File size</div><div class="value">{{ "%.2f"|format(file.file_size / 1024) }} KB</div></div>
+        <div class="item"><div class="label">Successful downloads</div><div class="value">{{ file.download_count }} / {{ file.max_downloads }}</div></div>
+        <div class="item"><div class="label">Expires (UTC)</div><div class="value">{{ file.expiry_time.replace("T", " ") }}</div></div>
+      </div>
+      <p class="warning">Public storage warning: this repository is public. App-level expiry and download limits do not prevent someone from accessing the file directly through GitHub. Do not share sensitive files.</p>
+      <p><a href="{{ url_for('index') }}">← Back to QuickShare</a></p>
+    </section>
+  </main>
+</body>
+</html>
