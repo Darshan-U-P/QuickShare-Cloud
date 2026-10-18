@@ -387,3 +387,13 @@ h1, h2, h3, p { margin-top: 0; }
   .share-list-metrics { grid-template-columns: 1fr; }
   .share-list-title-row { align-items: flex-start; flex-direction: column; }
 }
+
+
+/* Creator-passcode field and upload protection notice */
+input[type="password"] { width: 100%; height: 44px; padding: 0 13px; border: 1px solid rgba(146,169,216,.19); border-radius: 10px; outline: none; color: #edf2ff; background: #0a1325; font-size: 11px; }
+input[type="password"]:focus { border-color: rgba(121,234,215,.7); }
+input[type="password"]::placeholder { color: #7182a3; }
+.upload-disabled { display: flex; align-items: flex-start; gap: 12px; padding: 18px; border: 1px solid rgba(243,214,155,.22); border-radius: 14px; background: rgba(95,65,21,.17); }
+.upload-disabled strong { display: block; color: #f3d69b; font-size: 12px; }
+.upload-disabled p { margin: 7px 0 0; color: #c6b48e; font-size: 11px; line-height: 1.7; overflow-wrap: anywhere; }
+.upload-disabled code { color: #f3d69b; }
