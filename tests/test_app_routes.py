@@ -1,5 +1,3 @@
-import hashlib
-import hmac
 import io
 from datetime import datetime, timedelta, timezone
 
@@ -67,11 +65,7 @@ def test_my_shares_api_uses_current_account_hash(monkeypatch):
     assert response.status_code == 200
     assert response.json == {"shares": []}
     assert len(calls) == 1
-    expected = hmac.new(
-        str(app_module.app.config["SECRET_KEY"]).encode(),
-        b"test-google-subject",
-        hashlib.sha256,
-    ).hexdigest()
+    expected = app_module._current_owner_hash()
     assert calls[0] == expected
 
 
