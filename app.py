@@ -95,7 +95,14 @@ def add_security_headers(response):
 
 @app.get("/")
 def index():
-    return render_template("index.html", storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"))
+    upload_password_configured = bool(os.getenv("UPLOAD_PASSWORD", "").strip())
+    uploads_enabled = os.getenv("VERCEL", "") != "1" or upload_password_configured
+    return render_template(
+        "index.html",
+        storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"),
+        upload_protection_enabled=upload_password_configured,
+        uploads_enabled=uploads_enabled,
+    )
 
 
 @app.get("/my-shares")
@@ -127,6 +134,20 @@ def upload():
         return redirect(url_for("index"))
     if suffix and not EXTENSION_PATTERN.fullmatch(suffix):
         flash("The file extension is invalid.", "error")
+        return redirect(url_for("index"))
+
+    configured_upload_password = os.getenv("UPLOAD_PASSWORD", "").strip()
+    if os.getenv("VERCEL", "") == "1" and not configured_upload_password:
+        return render_template(
+            "error.html",
+            title="Uploads are temporarily disabled",
+            message="The site owner must configure UPLOAD_PASSWORD in Vercel Environment Variables before new uploads can be accepted.",
+        ), 503
+    if configured_upload_password and not hmac.compare_digest(
+        request.form.get("upload_password", ""),
+        configured_upload_password,
+    ):
+        flash("The creator passcode is incorrect.", "error")
         return redirect(url_for("index"))
 
     expiry_choice = request.form.get("expiry", "24h")
