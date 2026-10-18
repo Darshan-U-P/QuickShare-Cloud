@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QuickShare Cloud</title>
+  <style>
+    :root { color-scheme: dark; font-family: Inter, system-ui, Segoe UI, sans-serif; }
+    * { box-sizing: border-box; }
+    body { margin: 0; min-height: 100vh; color: #edf2ff; background: radial-gradient(circle at 12% 0%, #1b2a57 0, #0c1225 42%, #090d18 100%); }
+    main { width: min(920px, 92vw); margin: 0 auto; padding: 64px 0; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 750; letter-spacing: .2px; }
+    .mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, #7c9cff, #6ee7d2); color: #071021; font-size: 22px; }
+    .hero { margin-top: 70px; max-width: 700px; }
+    .eyebrow { color: #8be6d8; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; font-weight: 700; }
+    h1 { font-size: clamp(38px, 7vw, 68px); line-height: 1.04; margin: 14px 0 20px; letter-spacing: -2px; }
+    p { color: #aab6d0; line-height: 1.7; font-size: 17px; }
+    .panel { margin-top: 36px; padding: 24px; border: 1px solid #293656; border-radius: 20px; background: #111a2ccc; box-shadow: 0 22px 70px #0003; }
+    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 20px; }
+    .step { padding: 16px; border-radius: 14px; border: 1px solid #263452; background: #0e1729; }
+    .num { color: #8be6d8; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
+    h2 { font-size: 20px; margin: 8px 0; }
+    .step p { font-size: 14px; margin-bottom: 0; }
+    .status { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #2b4760; border-radius: 999px; padding: 8px 12px; font-size: 13px; color: #bcece4; }
+    .dot { width: 7px; height: 7px; border-radius: 50%; background: #61e6b1; }
+    code { color: #b8caff; }
+    footer { color: #7785a2; margin-top: 42px; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <main>
+    <div class="brand"><div class="mark">↗</div><span>QuickShare Cloud</span></div>
+    <section class="hero">
+      <span class="eyebrow">Share simply. Scan instantly.</span>
+      <h1>Your files,<br>one scan away.</h1>
+      <p>A college cloud-computing mini project for QR-code-based file sharing with expiring links, download limits, and usage tracking.</p>
+      <span class="status"><span class="dot"></span>Application skeleton running</span>
+    </section>
+    <section class="panel">
+      <h2>How QuickShare works</h2>
+      <div class="steps">
+        <article class="step"><span class="num">STEP 01</span><h2>Upload</h2><p>Select a small, non-sensitive demonstration file.</p></article>
+        <article class="step"><span class="num">STEP 02</span><h2>Generate</h2><p>Create a unique share link and its QR code.</p></article>
+        <article class="step"><span class="num">STEP 03</span><h2>Share</h2><p>Recipients scan the QR and request an authorized download.</p></article>
+      </div>
+      <p><strong>Storage target:</strong> <code>{{ storage_repo }}</code></p>
+      <p style="font-size:13px">Warning: the configured GitHub storage repository is public. Uploaded files must be treated as public and non-confidential.</p>
+    </section>
+    <footer>QuickShare Cloud · Flask + SQLite + GitHub REST API · Local development build</footer>
+  </main>
+</body>
+</html>
