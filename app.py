@@ -49,7 +49,7 @@ EXTENSION_PATTERN = re.compile(r"^\.[a-zA-Z0-9]{1,10}$")
 BLOCKED_EXTENSIONS = {
     ".exe", ".dll", ".sys", ".bat", ".cmd", ".ps1", ".sh", ".msi",
     ".com", ".scr", ".vbs", ".vbe", ".hta", ".jar", ".apk", ".reg",
-    ".lnk", ".html", ".htm", ".js", ".mjs",
+    ".lnk", ".html", ".htm", ".js", ".mjs", ".svg", ".xhtml", ".mhtml", ".wasm",
 }
 
 
