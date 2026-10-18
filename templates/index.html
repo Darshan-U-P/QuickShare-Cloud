@@ -51,7 +51,10 @@
       <span class="step-badge">01 <span>/ 01</span></span>
     </div>
 
-    <form id="upload-form" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+{% if not uploads_enabled %}
+      <div class="upload-disabled"><span class="privacy-icon" aria-hidden="true">!</span><div><strong>Uploads are protected</strong><p>The site owner needs to set <code>UPLOAD_PASSWORD</code> in Vercel Environment Variables before uploads can be enabled.</p></div></div>
+    {% else %}
+        <form id="upload-form" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
       <input id="file" name="file" type="file" required hidden>
       <label class="dropzone" id="dropzone" for="file" tabindex="0" role="button" aria-label="Choose a file or drag and drop it">
         <span class="upload-symbol" aria-hidden="true">
@@ -69,6 +72,10 @@
 
       <div class="form-options">
         <div class="field">
+{% if upload_protection_enabled %}
+          <label for="upload_password">Creator passcode</label>
+          <input id="upload_password" name="upload_password" type="password" autocomplete="current-password" required placeholder="Enter the creator passcode">
+          {% endif %}
           <label for="expiry">Link expires after</label>
           <div class="select-wrap">
             <span class="field-icon" aria-hidden="true">◷</span>
@@ -98,6 +105,7 @@
       <button class="btn btn-primary btn-submit" id="upload-submit" type="submit"><span>Upload &amp; generate QR</span><span class="btn-arrow" aria-hidden="true">↗</span></button>
       <p class="form-footnote"><span aria-hidden="true">⌑</span> Your share link and QR code will be ready immediately after upload.</p>
     </form>
+    {% endif %}
   </div>
 
   <aside class="side-column">
