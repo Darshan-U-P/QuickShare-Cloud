@@ -1,9 +1,13 @@
 (() => {
   "use strict";
 
-  const HISTORY_KEY = "quickshare.myShares.v1";
   const toast = document.getElementById("toast");
   let toastTimer = null;
+  const csrfToken = document.querySelector('meta[name="csrf-token"]')?.content || "";
+
+  // Older releases stored owner tokens in localStorage. Account ownership now
+  // comes from Google sign-in, so remove the obsolete client-side credentials.
+  try { localStorage.removeItem("quickshare.myShares.v1"); } catch (_error) {}
 
   function showToast(message) {
     if (!toast) return;
@@ -11,41 +15,6 @@
     toast.classList.add("is-visible");
     window.clearTimeout(toastTimer);
     toastTimer = window.setTimeout(() => toast.classList.remove("is-visible"), 2800);
-  }
-
-  function validShareId(value) {
-    return typeof value === "string" && /^[a-f0-9]{32}$/.test(value);
-  }
-
-  function readHistory() {
-    try {
-      const value = JSON.parse(localStorage.getItem(HISTORY_KEY) || "[]");
-      if (!Array.isArray(value)) return [];
-      return value.filter((item) => item && validShareId(item.shareId));
-    } catch (_error) {
-      return [];
-    }
-  }
-
-  function saveHistory(records) {
-    try {
-      const unique = [];
-      const seen = new Set();
-      for (const record of records) {
-        if (!record || !validShareId(record.shareId) || seen.has(record.shareId)) continue;
-        seen.add(record.shareId);
-        unique.push(record);
-      }
-      localStorage.setItem(HISTORY_KEY, JSON.stringify(unique.slice(0, 100)));
-      return true;
-    } catch (_error) {
-      showToast("Browser storage is unavailable. Save the share link separately.");
-      return false;
-    }
-  }
-
-  function findSavedShare(shareId) {
-    return readHistory().find((item) => item.shareId === shareId) || null;
   }
 
   function formatSize(bytes) {
@@ -62,15 +31,14 @@
   }
 
   function prettyStatus(value) {
-    const labels = {
+    return ({
       active: "Active",
       expired: "Expired",
       limit: "Limit reached",
       revoked: "Revoked",
       invalid: "Unavailable",
       missing: "Not found"
-    };
-    return labels[value] || "Unavailable";
+    })[value] || "Unavailable";
   }
 
   async function copyText(value) {
@@ -102,8 +70,7 @@
       const target = document.getElementById(button.dataset.copyTarget);
       if (!target) return;
       const original = button.innerHTML;
-      const copied = await copyText(target.value || target.textContent || "");
-      if (copied) {
+      if (await copyText(target.value || target.textContent || "")) {
         button.textContent = "✓ Copied";
         window.setTimeout(() => { button.innerHTML = original; }, 1800);
       }
@@ -114,29 +81,7 @@
     button.addEventListener("click", () => button.closest(".flash")?.remove());
   });
 
-  // The upload handler only exposes this one-time owner token to the browser
-  // that completed the upload. Save it locally so the owner can manage the share.
-  const createdShareScript = document.getElementById("quickshare-created-share");
-  if (createdShareScript) {
-    try {
-      const created = JSON.parse(createdShareScript.textContent || "{}");
-      if (validShareId(created.share_id) && typeof created.owner_token === "string" && created.owner_token.length > 20) {
-        const history = readHistory().filter((item) => item.shareId !== created.share_id);
-        history.unshift({
-          shareId: created.share_id,
-          ownerToken: created.owner_token,
-          filename: created.filename || "Shared file",
-          uploadTime: created.upload_time || new Date().toISOString()
-        });
-        saveHistory(history);
-        showToast("Share saved to My Shares in this browser.");
-      }
-    } catch (_error) {
-      showToast("This share was created, but browser history could not be saved.");
-    }
-  }
-
-  // Upload form: file picker, drag and drop, validation, and disabled submit state.
+  // Upload form interactions: drag/drop, file size validation, and feedback.
   const fileInput = document.getElementById("file");
   const dropzone = document.getElementById("dropzone");
   const selectedWrap = document.getElementById("selected-file");
@@ -222,25 +167,7 @@
     });
   }
 
-  // Owner-only revoke button on an individual share page.
-  const revokeCurrentButton = document.getElementById("revoke-current-share");
-  if (revokeCurrentButton) {
-    const shareId = revokeCurrentButton.dataset.shareId;
-    const record = findSavedShare(shareId);
-    const ownerHint = document.getElementById("owner-hint");
-    if (record?.ownerToken) {
-      revokeCurrentButton.hidden = false;
-      if (ownerHint) ownerHint.textContent = "You're managing this share from this browser.";
-      revokeCurrentButton.addEventListener("click", async () => {
-        if (!window.confirm("Revoke this share? QuickShare will stop serving downloads from this link.")) return;
-        await revokeShare(shareId, record.ownerToken, revokeCurrentButton);
-      });
-    } else if (ownerHint) {
-      ownerHint.hidden = true;
-    }
-  }
-
-  async function revokeShare(shareId, ownerToken, button) {
+  async function revokeShare(shareId, button) {
     if (button) {
       button.disabled = true;
       button.textContent = "Revoking…";
@@ -248,23 +175,35 @@
     try {
       const response = await fetch("/api/shares/" + encodeURIComponent(shareId) + "/revoke", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ owner_token: ownerToken })
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify({})
       });
       const data = await response.json().catch(() => ({}));
       if (!response.ok) throw new Error(data.error || "Could not revoke this share.");
       showToast("Share revoked. QuickShare downloads are now disabled.");
-      window.setTimeout(() => window.location.reload(), 700);
+      window.setTimeout(() => window.location.reload(), 650);
+      return true;
     } catch (error) {
       showToast(error.message || "Revoke failed. Try again.");
       if (button) {
         button.disabled = false;
-        button.textContent = "Revoke this link";
+        button.textContent = "Revoke";
       }
+      return false;
     }
   }
 
-  // My Shares: browser-local history, live status, owner-authorized activity and revoke.
+  const revokeCurrentButton = document.getElementById("revoke-current-share");
+  if (revokeCurrentButton) {
+    revokeCurrentButton.addEventListener("click", async () => {
+      if (!window.confirm("Revoke this share? QuickShare will stop serving downloads from this link.")) return;
+      await revokeShare(revokeCurrentButton.dataset.shareId, revokeCurrentButton);
+    });
+  }
+
+  // Account-scoped My Shares dashboard: the server decides ownership from the
+  // verified Google account in the signed session, never from browser-supplied IDs.
   const sharesList = document.getElementById("shares-list");
   if (sharesList) {
     const loading = document.getElementById("shares-loading");
@@ -279,6 +218,7 @@
     let allRecords = [];
     let filter = "all";
     let isLoading = false;
+    let loadFailed = false;
 
     function element(tag, className, text) {
       const node = document.createElement(tag);
@@ -295,40 +235,6 @@
       return "state-" + (["active", "expired", "limit", "revoked", "invalid"].includes(status) ? status : "invalid");
     }
 
-    async function refreshRecord(record) {
-      const fallback = {
-        share_id: record.shareId,
-        original_filename: record.filename || "Shared file",
-        upload_time: record.uploadTime || "",
-        status: "missing",
-        file_size: 0,
-        download_count: 0,
-        max_downloads: 0,
-        expiry_time: ""
-      };
-      try {
-        const response = await fetch("/api/shares/" + encodeURIComponent(record.shareId), { cache: "no-store" });
-        if (!response.ok) return { ...record, ...fallback, status: response.status === 404 ? "missing" : "invalid", analytics: null };
-        const data = await response.json();
-        let analytics = null;
-        if (record.ownerToken) {
-          try {
-            const activityResponse = await fetch("/api/shares/" + encodeURIComponent(record.shareId) + "/analytics", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ owner_token: record.ownerToken })
-            });
-            if (activityResponse.ok) analytics = await activityResponse.json();
-          } catch (_error) {
-            analytics = null;
-          }
-        }
-        return { ...record, ...data, analytics };
-      } catch (_error) {
-        return { ...record, ...fallback, status: "invalid", analytics: null, loadError: true };
-      }
-    }
-
     function makeButton(label, className, handler) {
       const button = element("button", "btn " + className, label);
       button.type = "button";
@@ -338,22 +244,18 @@
 
     function buildActivity(record) {
       const details = element("details", "share-activity");
-      const events = record.analytics?.downloads;
-      const summary = element("summary", "", "Download & access history" + (events ? " (" + events.length + ")" : ""));
-      details.appendChild(summary);
+      const events = Array.isArray(record.downloads) ? record.downloads : [];
+      details.appendChild(element("summary", "", "Download & access history (" + events.length + ")"));
       const list = element("div", "activity-list");
-      if (!record.ownerToken) {
-        list.appendChild(element("p", "activity-empty", "Owner activity is unavailable for this share. It may have been created before My Shares was added, or its owner key is not saved in this browser."));
-      } else if (!record.analytics) {
-        list.appendChild(element("p", "activity-empty", "Could not load activity. Refresh and try again."));
-      } else if (!events || events.length === 0) {
-        list.appendChild(element("p", "activity-empty", "No download attempts have been recorded yet."));
+      if (events.length === 0) {
+        list.appendChild(element("p", "activity-empty", "No download or access attempts have been recorded yet."));
       } else {
         [...events].reverse().forEach((event) => {
           const row = element("div", "activity-row");
-          const eventName = element("strong", "", String(event.status || "unknown").replaceAll("_", " "));
-          const eventTime = element("span", "", formatDate(event.time));
-          row.append(eventName, eventTime);
+          row.append(
+            element("strong", "", String(event.status || "unknown").replaceAll("_", " ")),
+            element("span", "", formatDate(event.time))
+          );
           list.appendChild(row);
         });
       }
@@ -364,25 +266,28 @@
     function buildCard(record) {
       const card = element("article", "share-list-card");
       const main = element("div", "share-list-main");
-      const fileIcon = element("span", "share-list-icon", "↗");
-      fileIcon.setAttribute("aria-hidden", "true");
+      const icon = element("span", "share-list-icon", "↗");
+      icon.setAttribute("aria-hidden", "true");
       const copy = element("div", "share-list-copy");
       const titleRow = element("div", "share-list-title-row");
-      titleRow.appendChild(element("strong", "share-list-title", record.original_filename || record.filename || "Shared file"));
-      titleRow.appendChild(element("span", "share-state " + statusClass(record.status), prettyStatus(record.status)));
-      copy.appendChild(titleRow);
-      copy.appendChild(element("p", "share-list-subtitle", formatSize(record.file_size) + " · Uploaded " + formatDate(record.upload_time || record.uploadTime)));
-      copy.appendChild(element("small", "share-list-id", "ID " + record.shareId.slice(0, 8) + "…"));
-      main.append(fileIcon, copy);
+      titleRow.append(
+        element("strong", "share-list-title", record.original_filename || "Shared file"),
+        element("span", "share-state " + statusClass(record.status), prettyStatus(record.status))
+      );
+      copy.append(
+        titleRow,
+        element("p", "share-list-subtitle", formatSize(record.file_size) + " · Uploaded " + formatDate(record.upload_time)),
+        element("small", "share-list-id", "ID " + record.share_id.slice(0, 8) + "…")
+      );
+      main.append(icon, copy);
       card.appendChild(main);
 
       const metricWrap = element("div", "share-list-metrics");
-      const values = [
+      [
         ["DOWNLOADS", (Number(record.download_count) || 0) + " / " + (Number(record.max_downloads) || 0)],
-        ["EXPIRES", record.expiry_time ? formatDate(record.expiry_time) : "Unknown"],
+        ["EXPIRES", formatDate(record.expiry_time)],
         ["REMAINING", Math.max(0, (Number(record.max_downloads) || 0) - (Number(record.download_count) || 0)) + " downloads"]
-      ];
-      values.forEach(([label, value]) => {
+      ].forEach(([label, value]) => {
         const box = element("div", "share-list-metric");
         box.append(element("span", "", label), element("strong", "", value));
         metricWrap.appendChild(box);
@@ -390,30 +295,23 @@
       card.appendChild(metricWrap);
 
       const actions = element("div", "share-list-actions");
-      actions.appendChild(makeButton("Copy link", "btn-secondary", () => copyText(currentLink(record.shareId))));
+      actions.appendChild(makeButton("Copy link", "btn-secondary", () => copyText(currentLink(record.share_id))));
       if (record.status === "active") {
         const qr = element("a", "btn btn-secondary", "Save QR");
-        qr.href = "/qr/" + encodeURIComponent(record.shareId) + ".png";
-        qr.download = "quickshare-" + record.shareId + ".png";
+        qr.href = "/qr/" + encodeURIComponent(record.share_id) + ".png";
+        qr.download = "quickshare-" + record.share_id + ".png";
         actions.appendChild(qr);
       }
       const open = element("a", "btn btn-secondary", "View share");
-      open.href = currentLink(record.shareId);
+      open.href = currentLink(record.share_id);
       actions.appendChild(open);
-      if (record.ownerToken && record.status === "active") {
+      if (record.status === "active") {
         actions.appendChild(makeButton("Revoke", "btn-danger", async (event) => {
-          const button = event.currentTarget;
           if (!window.confirm("Revoke this share? QuickShare will stop serving downloads from this link.")) return;
-          await revokeShare(record.shareId, record.ownerToken, button);
-          await refreshDashboard();
+          const ok = await revokeShare(record.share_id, event.currentTarget);
+          if (ok) await refreshDashboard();
         }));
       }
-      actions.appendChild(makeButton("Remove from list", "btn-muted", () => {
-        if (!window.confirm("Remove this share from this browser's list? This does not revoke the link.")) return;
-        saveHistory(readHistory().filter((item) => item.shareId !== record.shareId));
-        showToast("Removed from this browser's list.");
-        refreshDashboard();
-      }));
       card.appendChild(actions);
       card.appendChild(buildActivity(record));
       return card;
@@ -423,32 +321,47 @@
       sharesList.replaceChildren();
       const query = (searchInput?.value || "").trim().toLowerCase();
       const filtered = allRecords.filter((record) => {
-        const name = String(record.original_filename || record.filename || "").toLowerCase();
-        const id = String(record.shareId || "");
+        const name = String(record.original_filename || "").toLowerCase();
         const filterMatch = filter === "all" || record.status === filter;
-        return filterMatch && (!query || name.includes(query) || id.includes(query));
+        return filterMatch && (!query || name.includes(query) || String(record.share_id).includes(query));
       });
       filtered.forEach((record) => sharesList.appendChild(buildCard(record)));
       if (empty) empty.hidden = filtered.length !== 0;
-      if (emptyTitle) emptyTitle.textContent = allRecords.length === 0 ? "No shares saved yet" : "No matches found";
-      if (emptyDescription) emptyDescription.textContent = allRecords.length === 0
-        ? "Upload a file to create a link. It will appear here in this browser."
-        : "Try another search or filter. Your saved shares are still in this browser.";
+      if (emptyTitle) emptyTitle.textContent = loadFailed ? "Couldn't load your shares" : allRecords.length === 0 ? "No shares yet" : "No matches found";
+      if (emptyDescription) emptyDescription.textContent = loadFailed
+        ? "The account share list could not be loaded. Try refreshing in a moment."
+        : allRecords.length === 0
+          ? "Upload a file to create a share. It will be available here whenever you sign in to this account."
+          : "Try another search or filter. Your other shares are still available.";
       if (loading) loading.hidden = true;
     }
 
     async function refreshDashboard() {
       if (isLoading) return;
       isLoading = true;
+      loadFailed = false;
       if (loading) loading.hidden = false;
       if (empty) empty.hidden = true;
       if (refreshButton) refreshButton.disabled = true;
       try {
-        const saved = readHistory();
-        allRecords = await Promise.all(saved.slice(0, 100).map(refreshRecord));
+        const response = await fetch("/api/my-shares", { credentials: "same-origin", cache: "no-store" });
+        const data = await response.json().catch(() => ({}));
+        if (response.status === 401) {
+          window.location.href = "/login?next=%2Fmy-shares";
+          return;
+        }
+        if (!response.ok) throw new Error(data.error || "Could not load shares");
+        allRecords = Array.isArray(data.shares) ? data.shares : [];
         if (statTotal) statTotal.textContent = String(allRecords.length);
         if (statDownloads) statDownloads.textContent = String(allRecords.reduce((sum, record) => sum + (Number(record.download_count) || 0), 0));
         if (statActive) statActive.textContent = String(allRecords.filter((record) => record.status === "active").length);
+        renderRecords();
+      } catch (_error) {
+        allRecords = [];
+        loadFailed = true;
+        if (statTotal) statTotal.textContent = "—";
+        if (statDownloads) statDownloads.textContent = "—";
+        if (statActive) statActive.textContent = "—";
         renderRecords();
       } finally {
         isLoading = false;
