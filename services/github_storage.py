@@ -304,7 +304,7 @@ def _list_metadata_names() -> list[str]:
             if item.get("type") == "file"
             and item.get("name", "").endswith(".json")
             and item.get("name", "")[:-5].isalnum()
-        ][:100]
+        ]
     except (ValueError, KeyError, TypeError, AttributeError) as exc:
         raise GitHubStorageError("GitHub returned an invalid metadata directory listing.") from exc
 
@@ -350,8 +350,13 @@ def cleanup_expired_files(max_items: int = 20) -> dict:
     names = _list_metadata_names()
     summary = {"scanned": 0, "deleted": 0, "already_missing": 0, "failed": 0, "skipped": 0, "items": []}
     limit = max(1, min(100, int(max_items)))
-    for share_id in names[:limit]:
+    scanned_names = 0
+    cleanup_attempts = 0
+    for share_id in names:
+        if cleanup_attempts >= limit:
+            break
         summary["scanned"] += 1
+        scanned_names += 1
         try:
             metadata = get_share_metadata(share_id)
             if not metadata:
@@ -365,6 +370,7 @@ def cleanup_expired_files(max_items: int = 20) -> dict:
                 summary["skipped"] += 1
                 continue
 
+            cleanup_attempts += 1
             deletion_result = delete_storage_file(metadata.get("storage_path", ""))
             cleanup_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
@@ -391,7 +397,7 @@ def cleanup_expired_files(max_items: int = 20) -> dict:
         except GitHubStorageError as exc:
             summary["failed"] += 1
             summary["items"].append({"share_id": share_id, "status": "failed", "message": str(exc)})
-    summary["remaining_metadata"] = max(0, len(names) - min(len(names), limit))
+    summary["remaining_metadata"] = max(0, len(names) - scanned_names)
     return summary
 
 
