@@ -1,3 +1,5 @@
+import hashlib
+import hmac
 import mimetypes
 import os
 import re
@@ -8,15 +10,19 @@ from pathlib import Path
 
 import qrcode
 from dotenv import load_dotenv
-from flask import Flask, abort, flash, redirect, render_template, request, send_file, url_for
+from flask import Flask, abort, flash, jsonify, redirect, render_template, request, send_file, session, url_for
 
 from services.github_storage import (
     GitHubStorageError,
+    cleanup_expired_files,
     create_share_metadata,
     download_public_file,
+    get_share_analytics,
     get_share_metadata,
     record_download,
     record_rejected_attempt,
+    revoke_share,
+    share_status as calculate_share_status,
     upload_file_bytes,
 )
 
@@ -25,8 +31,10 @@ load_dotenv(BASE_DIR / ".env")
 
 app = Flask(__name__)
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "local-development-only-change-me")
-# Vercel Functions accept at most 4.5 MB request/response payloads. A 3 MB cap
-# leaves headroom for multipart form overhead and file-download responses.
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_SECURE"] = os.getenv("VERCEL", "") == "1"
+# Vercel Function payloads are limited; cap application uploads at 3 MiB.
 app.config["MAX_CONTENT_LENGTH"] = max(1, min(3, int(os.getenv("MAX_CONTENT_LENGTH_MB", "3")))) * 1024 * 1024
 
 EXPIRATION_OPTIONS = {
@@ -38,6 +46,11 @@ EXPIRATION_OPTIONS = {
 DOWNLOAD_LIMITS = {1, 3, 5, 10}
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 EXTENSION_PATTERN = re.compile(r"^\.[a-zA-Z0-9]{1,10}$")
+BLOCKED_EXTENSIONS = {
+    ".exe", ".dll", ".sys", ".bat", ".cmd", ".ps1", ".sh", ".msi",
+    ".com", ".scr", ".vbs", ".vbe", ".hta", ".jar", ".apk", ".reg",
+    ".lnk", ".html", ".htm", ".js", ".mjs",
+}
 
 
 def make_share_url(share_id: str) -> str:
@@ -48,21 +61,46 @@ def make_share_url(share_id: str) -> str:
 
 def share_status(file_record: dict) -> str:
     try:
-        expiry = datetime.fromisoformat(file_record["expiry_time"])
-        if expiry.tzinfo is None:
-            expiry = expiry.replace(tzinfo=timezone.utc)
-        if expiry <= datetime.now(timezone.utc):
-            return "expired"
-        if int(file_record["download_count"]) >= int(file_record["max_downloads"]):
-            return "limit"
-        return "active"
-    except (KeyError, TypeError, ValueError):
+        return calculate_share_status(file_record)
+    except GitHubStorageError:
         return "invalid"
+
+
+def _public_share_data(metadata: dict) -> dict:
+    return {
+        "share_id": metadata.get("share_id"),
+        "original_filename": metadata.get("original_filename", "Unnamed file"),
+        "file_size": int(metadata.get("file_size", 0)),
+        "upload_time": metadata.get("upload_time", ""),
+        "expiry_time": metadata.get("expiry_time", ""),
+        "max_downloads": int(metadata.get("max_downloads", 0)),
+        "download_count": int(metadata.get("download_count", 0)),
+        "status": share_status(metadata),
+        "revoked_at": metadata.get("revoked_at"),
+        "cleanup_status": metadata.get("cleanup_status", "pending"),
+    }
+
+
+@app.after_request
+def add_security_headers(response):
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    if request.path.startswith("/static/"):
+        response.headers.setdefault("Cache-Control", "public, max-age=3600")
+    else:
+        response.headers.setdefault("Cache-Control", "no-store")
+    return response
 
 
 @app.get("/")
 def index():
     return render_template("index.html", storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"))
+
+
+@app.get("/my-shares")
+def my_shares():
+    return render_template("my_shares.html")
 
 
 @app.get("/health")
@@ -77,10 +115,18 @@ def upload():
         flash("Choose a file before uploading.", "error")
         return redirect(url_for("index"))
 
-    # This public repository is for small, non-sensitive demo files only.
+    # Only small, non-sensitive demo files should ever enter the public repo.
     original_name = uploaded.filename.replace("\\", "/").split("/")[-1].strip()[:200]
     if not original_name:
         flash("The uploaded filename is invalid.", "error")
+        return redirect(url_for("index"))
+
+    suffix = Path(original_name).suffix.lower()
+    if suffix in BLOCKED_EXTENSIONS:
+        flash("That file type is not accepted. Upload a document, image, archive, or other non-executable demo file.", "error")
+        return redirect(url_for("index"))
+    if suffix and not EXTENSION_PATTERN.fullmatch(suffix):
+        flash("The file extension is invalid.", "error")
         return redirect(url_for("index"))
 
     expiry_choice = request.form.get("expiry", "24h")
@@ -100,12 +146,13 @@ def upload():
     if not content:
         flash("The selected file is empty.", "error")
         return redirect(url_for("index"))
+    if len(content) > app.config["MAX_CONTENT_LENGTH"]:
+        flash("The selected file is too large. The maximum is 3 MB.", "error")
+        return redirect(url_for("index"))
 
     share_id = secrets.token_hex(16)
-    suffix = Path(original_name).suffix
-    if not EXTENSION_PATTERN.fullmatch(suffix):
-        suffix = ".bin"
-    storage_path = f"files/{share_id}{suffix.lower()}"
+    owner_token = secrets.token_urlsafe(32)
+    storage_path = f"files/{share_id}{suffix or '.bin'}"
     label, duration = EXPIRATION_OPTIONS[expiry_choice]
     now = datetime.now(timezone.utc)
     metadata = {
@@ -118,6 +165,9 @@ def upload():
         "max_downloads": max_downloads,
         "download_count": 0,
         "downloads": [],
+        "owner_token_hash": hashlib.sha256(owner_token.encode("utf-8")).hexdigest(),
+        "revoked": False,
+        "cleanup_status": "pending",
     }
 
     try:
@@ -132,8 +182,11 @@ def upload():
         flash("The file may have reached GitHub, but its metadata could not be saved. Check the storage repository before retrying.", "error")
         return redirect(url_for("index"))
 
+    # Deliver the one-time owner token to the browser through a short redirect
+    # session. It is never placed in the public share URL.
+    session["quickshare_created"] = {"share_id": share_id, "owner_token": owner_token}
     flash(f"File uploaded. Sharing link expires in {label}.", "success")
-    return redirect(url_for("share_page", share_id=share_id))
+    return redirect(url_for("share_page", share_id=share_id), code=303)
 
 
 @app.get("/s/<share_id>")
@@ -143,6 +196,11 @@ def share_page(share_id: str):
     file_record = get_share_metadata(share_id)
     if not file_record:
         abort(404)
+    created = session.get("quickshare_created", {})
+    owner_token = None
+    if created.get("share_id") == share_id:
+        owner_token = created.get("owner_token")
+        session.pop("quickshare_created", None)
     status = share_status(file_record)
     error = request.args.get("error", "")
     return render_template(
@@ -151,6 +209,7 @@ def share_page(share_id: str):
         status=status,
         error=error,
         share_url=make_share_url(share_id),
+        owner_token=owner_token,
     )
 
 
@@ -180,8 +239,6 @@ def download(share_id: str):
 
     try:
         content = download_public_file(file_record["storage_path"])
-        # The GitHub metadata SHA is checked and updated, retrying stale updates.
-        # This suits a low-traffic college prototype, not a transactional production system.
         result = record_download(share_id)
     except GitHubStorageError as exc:
         app.logger.warning("GitHub download failed for share %s: %s", share_id, exc)
@@ -191,18 +248,76 @@ def download(share_id: str):
         return redirect(url_for("share_page", share_id=share_id, error=result))
 
     mimetype = mimetypes.guess_type(file_record["original_filename"])[0] or "application/octet-stream"
-    return send_file(
+    response = send_file(
         BytesIO(content),
         mimetype=mimetype,
         as_attachment=True,
         download_name=file_record["original_filename"],
         max_age=0,
     )
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+@app.get("/api/shares/<share_id>")
+def api_share(share_id: str):
+    if not SHARE_ID_PATTERN.fullmatch(share_id):
+        abort(404)
+    metadata = get_share_metadata(share_id)
+    if not metadata:
+        abort(404)
+    return jsonify(_public_share_data(metadata))
+
+
+@app.post("/api/shares/<share_id>/analytics")
+def api_share_analytics(share_id: str):
+    if not SHARE_ID_PATTERN.fullmatch(share_id):
+        abort(404)
+    body = request.get_json(silent=True) or {}
+    result, analytics = get_share_analytics(share_id, body.get("owner_token", ""))
+    if result == "not_found":
+        return jsonify({"error": "Share not found"}), 404
+    if result == "unauthorized":
+        return jsonify({"error": "Management token is invalid"}), 403
+    return jsonify(analytics)
+
+
+@app.post("/api/shares/<share_id>/revoke")
+def api_revoke_share(share_id: str):
+    if not SHARE_ID_PATTERN.fullmatch(share_id):
+        abort(404)
+    body = request.get_json(silent=True) or {}
+    result = revoke_share(share_id, body.get("owner_token", ""))
+    if result == "not_found":
+        return jsonify({"error": "Share not found"}), 404
+    if result == "unauthorized":
+        return jsonify({"error": "Management token is invalid"}), 403
+    if result == "conflict":
+        return jsonify({"error": "The share changed concurrently. Please retry."}), 409
+    if result in {"success", "revoked"}:
+        return jsonify({"ok": True, "status": "revoked"})
+    return jsonify({"error": "Could not revoke the share"}), 503
+
+
+@app.get("/api/cron/cleanup")
+def api_cron_cleanup():
+    expected = os.getenv("CRON_SECRET", "")
+    supplied = request.headers.get("Authorization", "")
+    if not expected:
+        return jsonify({"error": "Cleanup is not configured"}), 503
+    if not hmac.compare_digest(supplied, f"Bearer {expected}"):
+        return jsonify({"error": "Unauthorized"}), 401
+    try:
+        return jsonify({"ok": True, **cleanup_expired_files(max_items=20)})
+    except GitHubStorageError as exc:
+        app.logger.warning("Scheduled cleanup failed: %s", exc)
+        return jsonify({"error": str(exc)}), 503
 
 
 @app.errorhandler(413)
 def file_too_large(_error):
-    flash("File is too large. The maximum upload size is configured in .env and capped at 3 MB for Vercel.", "error")
+    flash("File is too large. The maximum upload size is capped at 3 MB.", "error")
     return redirect(url_for("index"))
 
 
@@ -212,8 +327,8 @@ def not_found(_error):
 
 
 @app.errorhandler(GitHubStorageError)
-def github_storage_error(_error):
-    app.logger.exception("GitHub storage service failed")
+def github_storage_error(error):
+    app.logger.warning("GitHub storage service failed: %s", error)
     return render_template(
         "error.html",
         title="Storage temporarily unavailable",
@@ -222,5 +337,4 @@ def github_storage_error(_error):
 
 
 if __name__ == "__main__":
-    # Local development only. Vercel imports the Flask app instance.
     app.run(host="127.0.0.1", port=5000, debug=os.getenv("FLASK_DEBUG", "0") == "1")
