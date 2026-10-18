@@ -8,23 +8,33 @@
     :root { color-scheme: dark; font-family: Inter, system-ui, Segoe UI, sans-serif; }
     * { box-sizing: border-box; }
     body { margin: 0; min-height: 100vh; color: #edf2ff; background: radial-gradient(circle at 12% 0%, #1b2a57 0, #0c1225 42%, #090d18 100%); }
-    main { width: min(920px, 92vw); margin: 0 auto; padding: 64px 0; }
-    .brand { display: flex; align-items: center; gap: 12px; font-weight: 750; letter-spacing: .2px; }
+    main { width: min(960px, 92vw); margin: 0 auto; padding: 45px 0 64px; }
+    .brand { display: flex; align-items: center; gap: 12px; font-weight: 750; }
     .mark { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 14px; background: linear-gradient(135deg, #7c9cff, #6ee7d2); color: #071021; font-size: 22px; }
-    .hero { margin-top: 70px; max-width: 700px; }
+    .hero { margin-top: 52px; max-width: 720px; }
     .eyebrow { color: #8be6d8; text-transform: uppercase; letter-spacing: 2px; font-size: 12px; font-weight: 700; }
-    h1 { font-size: clamp(38px, 7vw, 68px); line-height: 1.04; margin: 14px 0 20px; letter-spacing: -2px; }
-    p { color: #aab6d0; line-height: 1.7; font-size: 17px; }
-    .panel { margin-top: 36px; padding: 24px; border: 1px solid #293656; border-radius: 20px; background: #111a2ccc; box-shadow: 0 22px 70px #0003; }
-    .steps { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 14px; margin-top: 20px; }
+    h1 { font-size: clamp(38px, 7vw, 66px); line-height: 1.04; margin: 14px 0 20px; letter-spacing: -2px; }
+    h2 { font-size: 20px; margin: 0 0 16px; }
+    p { color: #aab6d0; line-height: 1.7; }
+    .layout { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(260px, .85fr); gap: 18px; margin-top: 30px; }
+    .panel { padding: 24px; border: 1px solid #293656; border-radius: 20px; background: #111a2ce8; box-shadow: 0 22px 70px #0003; }
+    label { display: block; font-size: 13px; color: #c4cee4; margin: 15px 0 7px; }
+    input[type=file], select { width: 100%; background: #0b1323; color: #edf2ff; border: 1px solid #334365; border-radius: 10px; padding: 12px; }
+    input[type=file] { font-size: 13px; }
+    button { margin-top: 20px; border: 0; border-radius: 11px; width: 100%; padding: 13px 16px; background: linear-gradient(135deg, #8ca7ff, #6ee7d2); color: #081222; font-weight: 800; cursor: pointer; }
+    .status { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #2b4760; border-radius: 999px; padding: 8px 12px; font-size: 12px; color: #bcece4; }
+    .steps { display: grid; gap: 14px; }
     .step { padding: 16px; border-radius: 14px; border: 1px solid #263452; background: #0e1729; }
     .num { color: #8be6d8; font-size: 12px; font-weight: 800; letter-spacing: 1px; }
-    h2 { font-size: 20px; margin: 8px 0; }
-    .step p { font-size: 14px; margin-bottom: 0; }
-    .status { display: inline-flex; align-items: center; gap: 8px; border: 1px solid #2b4760; border-radius: 999px; padding: 8px 12px; font-size: 13px; color: #bcece4; }
-    .dot { width: 7px; height: 7px; border-radius: 50%; background: #61e6b1; }
+    .step h3 { margin: 7px 0; }
+    .step p { margin: 0; font-size: 14px; }
+    .flash { padding: 12px 14px; border-radius: 12px; margin: 18px 0; font-size: 14px; }
+    .error { border: 1px solid #884650; background: #351b26; color: #ffd9de; }
+    .success { border: 1px solid #2b7566; background: #10332e; color: #c0fff0; }
+    .warning { color: #f0d5a0; font-size: 12px; }
     code { color: #b8caff; }
-    footer { color: #7785a2; margin-top: 42px; font-size: 12px; }
+    footer { color: #7785a2; margin-top: 35px; font-size: 12px; }
+    @media (max-width: 720px) { .layout { grid-template-columns: 1fr; } .hero { margin-top: 38px; } }
   </style>
 </head>
 <body>
@@ -33,20 +43,50 @@
     <section class="hero">
       <span class="eyebrow">Share simply. Scan instantly.</span>
       <h1>Your files,<br>one scan away.</h1>
-      <p>A college cloud-computing mini project for QR-code-based file sharing with expiring links, download limits, and usage tracking.</p>
-      <span class="status"><span class="dot"></span>Application skeleton running</span>
+      <p>Upload a small demonstration file, then share it with a QR code or unique link. Expiration and download limits are enforced by this Flask app.</p>
+      <span class="status">● Local development build</span>
     </section>
-    <section class="panel">
-      <h2>How QuickShare works</h2>
-      <div class="steps">
-        <article class="step"><span class="num">STEP 01</span><h2>Upload</h2><p>Select a small, non-sensitive demonstration file.</p></article>
-        <article class="step"><span class="num">STEP 02</span><h2>Generate</h2><p>Create a unique share link and its QR code.</p></article>
-        <article class="step"><span class="num">STEP 03</span><h2>Share</h2><p>Recipients scan the QR and request an authorized download.</p></article>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+        <div class="flash {{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <section class="layout">
+      <div class="panel">
+        <h2>Upload a file</h2>
+        <form action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
+          <label for="file">Choose a file (max {{ (config.MAX_CONTENT_LENGTH // (1024 * 1024)) }} MB)</label>
+          <input id="file" name="file" type="file" required>
+          <label for="expiry">Link expiration</label>
+          <select id="expiry" name="expiry">
+            <option value="10m">10 minutes</option>
+            <option value="1h">1 hour</option>
+            <option value="24h" selected>24 hours</option>
+            <option value="7d">7 days</option>
+          </select>
+          <label for="max_downloads">Maximum successful downloads</label>
+          <select id="max_downloads" name="max_downloads">
+            <option value="1">1 download</option>
+            <option value="3" selected>3 downloads</option>
+            <option value="5">5 downloads</option>
+            <option value="10">10 downloads</option>
+          </select>
+          <button type="submit">Upload &amp; generate QR code</button>
+        </form>
+        <p class="warning">Public repository: upload only non-sensitive files. Anyone may find or access files in the public storage repository, bypassing app-level restrictions.</p>
       </div>
-      <p><strong>Storage target:</strong> <code>{{ storage_repo }}</code></p>
-      <p style="font-size:13px">Warning: the configured GitHub storage repository is public. Uploaded files must be treated as public and non-confidential.</p>
+      <div class="panel">
+        <h2>How it works</h2>
+        <div class="steps">
+          <article class="step"><span class="num">STEP 01</span><h3>Upload</h3><p>Flask validates your file and sends it to <code>{{ storage_repo }}</code>.</p></article>
+          <article class="step"><span class="num">STEP 02</span><h3>Generate</h3><p>A unique share page and QR code are created.</p></article>
+          <article class="step"><span class="num">STEP 03</span><h3>Control access</h3><p>The app checks expiration and limits when a recipient downloads.</p></article>
+        </div>
+      </div>
     </section>
-    <footer>QuickShare Cloud · Flask + SQLite + GitHub REST API · Local development build</footer>
+    <footer>QuickShare Cloud · Flask + SQLite + GitHub REST API · College mini project</footer>
   </main>
 </body>
 </html>
