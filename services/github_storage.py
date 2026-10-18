@@ -472,7 +472,8 @@ def download_public_file(storage_path: str) -> bytes:
     if response.status_code == 404:
         raise GitHubStorageError("The file was not found in GitHub storage.")
     if not response.ok:
-        if response.status_code == 429:
+        body_text = (getattr(response, "text", "") or "").lower()
+        if response.status_code == 429 or (response.status_code == 403 and "rate limit" in body_text):
             raise GitHubStorageError("GitHub raw download rate limit reached. Retry later.")
         raise GitHubStorageError(f"GitHub storage returned HTTP {response.status_code} while downloading.")
     return response.content
