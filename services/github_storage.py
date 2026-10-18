@@ -345,18 +345,71 @@ def delete_storage_file(storage_path: str) -> str:
     return "deleted"
 
 
-def cleanup_expired_files(max_items: int = 20) -> dict:
-    """Delete current-branch file blobs for expired/revoked shares and retain status metadata."""
+def _get_cleanup_cursor() -> str:
+    found = _get_json_file("metadata/.cleanup_cursor.json")
+    if not found:
+        return ""
+    value = found[0].get("last_share_id", "")
+    return value if isinstance(value, str) else ""
+
+
+def _set_cleanup_cursor(share_id: str) -> None:
+    path = "metadata/.cleanup_cursor.json"
+    value = {
+        "last_share_id": share_id,
+        "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+    body = json.dumps(value, indent=2).encode("utf-8")
+    for _attempt in range(3):
+        found = _get_json_file(path)
+        try:
+            _put_contents(
+                path,
+                body,
+                "Update QuickShare cleanup cursor",
+                sha=found[1] if found else None,
+            )
+            return
+        except GitHubConflictError:
+            continue
+    raise GitHubStorageError("Could not update the cleanup cursor after repeated conflicts.")
+
+
+def cleanup_expired_files(max_items: int = 20, max_scan: int = 100) -> dict:
+    """Delete current-branch file blobs for expired/revoked shares and retain status metadata.
+
+    A saved cursor keeps daily runs moving across the metadata directory without
+    reading every share on every invocation. At most max_scan records are checked
+    and at most max_items eligible records are cleaned per run.
+    """
     names = _list_metadata_names()
-    summary = {"scanned": 0, "deleted": 0, "already_missing": 0, "failed": 0, "skipped": 0, "items": []}
+    summary = {
+        "scanned": 0, "deleted": 0, "already_missing": 0,
+        "failed": 0, "skipped": 0, "items": [],
+    }
+    if not names:
+        summary["remaining_metadata"] = 0
+        return summary
+
     limit = max(1, min(100, int(max_items)))
-    scanned_names = 0
+    scan_limit = max(1, min(200, int(max_scan)))
+    try:
+        cursor = _get_cleanup_cursor()
+    except GitHubStorageError as exc:
+        summary["cursor_warning"] = str(exc)
+        cursor = ""
+    if cursor in names:
+        cursor_index = names.index(cursor)
+        ordered_names = names[cursor_index + 1:] + names[:cursor_index + 1]
+    else:
+        ordered_names = names
+    scan_names = ordered_names[:scan_limit]
     cleanup_attempts = 0
-    for share_id in names:
+
+    for share_id in scan_names:
         if cleanup_attempts >= limit:
             break
         summary["scanned"] += 1
-        scanned_names += 1
         try:
             metadata = get_share_metadata(share_id)
             if not metadata:
@@ -397,9 +450,14 @@ def cleanup_expired_files(max_items: int = 20) -> dict:
         except GitHubStorageError as exc:
             summary["failed"] += 1
             summary["items"].append({"share_id": share_id, "status": "failed", "message": str(exc)})
-    summary["remaining_metadata"] = max(0, len(names) - scanned_names)
-    return summary
 
+    if summary["scanned"]:
+        try:
+            _set_cleanup_cursor(scan_names[summary["scanned"] - 1])
+        except GitHubStorageError as exc:
+            summary["cursor_warning"] = str(exc)
+    summary["remaining_metadata"] = max(0, len(names) - summary["scanned"])
+    return summary
 
 def download_public_file(storage_path: str) -> bytes:
     """Download a known file from the configured public repository."""
