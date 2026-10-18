@@ -90,7 +90,7 @@ def _current_owner_hash() -> str | None:
     user = _current_user()
     if not user:
         return None
-    key = str(app.config["SECRET_KEY"]).encode("utf-8")
+    key = str(os.getenv("OWNER_HASH_SECRET") or app.config["SECRET_KEY"]).encode("utf-8")
     subject = str(user["sub"]).encode("utf-8")
     return hmac.new(key, subject, hashlib.sha256).hexdigest()
 
