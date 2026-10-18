@@ -70,3 +70,39 @@ def test_cleanup_endpoint_requires_bearer_secret(monkeypatch):
     client = app_module.app.test_client()
     response = client.get("/api/cron/cleanup")
     assert response.status_code == 401
+
+
+
+def test_vercel_uploads_are_disabled_without_creator_password(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.delenv("UPLOAD_PASSWORD", raising=False)
+    client = app_module.app.test_client()
+    response = client.post(
+        "/upload",
+        data={"file": (io.BytesIO(b"demo"), "demo.txt")},
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 503
+    assert b"UPLOAD_PASSWORD" in response.data
+
+
+def test_wrong_creator_password_is_rejected(monkeypatch):
+    monkeypatch.setenv("VERCEL", "1")
+    monkeypatch.setenv("UPLOAD_PASSWORD", "correct-passphrase")
+    client = app_module.app.test_client()
+
+    def unexpected_upload(**_kwargs):
+        raise AssertionError("GitHub upload must not run for an incorrect creator passcode")
+
+    monkeypatch.setattr(app_module, "upload_file_bytes", unexpected_upload)
+    response = client.post(
+        "/upload",
+        data={
+            "upload_password": "wrong-passphrase",
+            "file": (io.BytesIO(b"demo"), "demo.txt"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"creator passcode is incorrect" in response.data
