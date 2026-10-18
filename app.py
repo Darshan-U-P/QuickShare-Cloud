@@ -42,8 +42,8 @@ app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("VERCEL", "") == "1"
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-# Vercel request/response payloads are limited; cap uploads at 3 MiB.
-app.config["MAX_CONTENT_LENGTH"] = max(1, min(3, int(os.getenv("MAX_CONTENT_LENGTH_MB", "3")))) * 1024 * 1024
+# Vercel Function request and response payloads are limited to 4.5 MB; cap uploads at 4 MiB.
+app.config["MAX_CONTENT_LENGTH"] = max(1, min(4, int(os.getenv("MAX_CONTENT_LENGTH_MB", "4")))) * 1024 * 1024
 
 oauth = OAuth(app)
 oauth.register(
@@ -287,7 +287,7 @@ def upload():
         flash("The selected file is empty.", "error")
         return redirect(url_for("index"))
     if len(content) > app.config["MAX_CONTENT_LENGTH"]:
-        flash("The selected file is too large. The maximum is 3 MB.", "error")
+        flash("The selected file is too large. The maximum is 4 MB.", "error")
         return redirect(url_for("index"))
 
     user = _current_user()
@@ -462,7 +462,7 @@ def api_cron_cleanup():
 
 @app.errorhandler(413)
 def file_too_large(_error):
-    flash("File is too large. The maximum upload size is capped at 3 MB.", "error")
+    flash("File is too large. The maximum upload size is capped at 4 MB.", "error")
     return redirect(url_for("index"))
 
 
