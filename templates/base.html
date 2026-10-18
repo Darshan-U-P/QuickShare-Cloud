@@ -4,9 +4,10 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <meta name="theme-color" content="#0b1020">
+  <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="description" content="QuickShare Cloud — share small files with a QR code, expiring links and download controls.">
   <title>{% block title %}QuickShare Cloud{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='5') }}">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -21,8 +22,13 @@
       </a>
       <nav class="top-nav" aria-label="Main navigation">
         <a href="{{ url_for('index') }}#how-it-works">How it works</a>
-        <a href="{{ url_for('my_shares') }}">My Shares</a>
-        <a class="nav-cta" href="{{ url_for('index') }}#upload">Share a file <span aria-hidden="true">↗</span></a>
+        {% if session.get('user') %}
+          <a href="{{ url_for('my_shares') }}">My Shares</a>
+          <span class="account-chip" title="{{ session.get('user', {}).get('email', '') }}"><span class="account-avatar">{{ session.get('user', {}).get('name', 'Q')[:1]|upper }}</span><span class="account-name">{{ session.get('user', {}).get('name', 'Account') }}</span></span>
+          <a class="nav-cta" href="{{ url_for('logout') }}">Sign out <span aria-hidden="true">↗</span></a>
+        {% else %}
+          <a class="nav-cta google-login-cta" href="{{ url_for('login') }}"><span class="google-g">G</span> Sign in with Google</a>
+        {% endif %}
       </nav>
     </header>
 
@@ -51,6 +57,6 @@
     </footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="{{ url_for('static', filename='js/app.js', v='3') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='5') }}" defer></script>
 </body>
 </html>
