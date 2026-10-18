@@ -2,28 +2,28 @@
 
 A college mini-project demonstrating QR-code-based file sharing, expiry enforcement, download limits, and GitHub-backed storage.
 
-## Architecture
+## Current implementation
 
-- **Flask** serves the web UI and validates share requests.
-- **SQLite** stores share metadata and download activity.
-- **GitHub REST API** stores demonstration files in the separate public `QuickShare-Storage` repository.
-- **qrcode** generates QR codes for application share URLs.
-
-> **Public-storage warning:** Files committed to the public storage repository must be treated as public. Deleting a file from the latest revision does not guarantee removal from Git history. Do not upload private or sensitive data.
+- Flask home page and health endpoint.
+- File upload to the configured GitHub repository through the GitHub Contents API.
+- SQLite metadata and download activity records.
+- QR-code generation for each share page.
+- Expiration checks and server-side download limits.
+- A 5 MB default upload cap (configurable through `MAX_CONTENT_LENGTH_MB`).
 
 ## Local setup
 
 1. Create and activate a virtual environment.
-2. Install requirements: `pip install -r requirements.txt`
-3. Copy `.env.example` to `.env` and configure the values.
+2. Install dependencies: `pip install -r requirements.txt`.
+3. Copy `.env.example` to `.env` and configure your token and repository.
 4. Run `python app.py`.
 
-The app is intended for local development. Sharing from outside your network requires a publicly reachable app host; GitHub stores files, but does not host this Flask application.
+Never commit `.env`. A fine-grained GitHub token should be limited to the `QuickShare-Storage` repository and have Contents: Read and write permission.
 
-## Planned milestones
+## Critical storage limitation
 
-1. Flask home page and configuration validation.
-2. Upload demonstration files through the GitHub API.
-3. Store metadata and generate QR-code share pages.
-4. Enforce expiry and download limits on the server.
-5. Add cleanup, tests, and project documentation.
+The storage repository is public. All files there must be treated as public and non-sensitive. App-level expiration and download limits only protect requests made through QuickShare; they do not prevent direct access to the public repository. Deleting a file from the current branch does not guarantee erasure from Git history. This is a learning prototype, not production-grade private file storage.
+
+## Local-only network behavior
+
+Flask binds to `127.0.0.1` for local development. A QR code generated with this base address will work on the same computer only. For access from another device, configure a reachable base URL and a deliberate network binding/firewall rule. Do not expose Flask's debug server directly to the public internet.
