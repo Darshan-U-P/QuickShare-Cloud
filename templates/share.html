@@ -3,39 +3,34 @@
 {% block content %}
 <section class="share-page">
   <a class="back-link" href="{{ url_for('index') }}"><span aria-hidden="true">←</span> Back to QuickShare</a>
-
   <div class="share-head">
     <div>
       <div class="section-kicker">YOUR SHARE SPACE</div>
       {% if status == "active" %}
-        <h1>Ready to <span>share.</span></h1>
-        <p>Your file is uploaded. Share the link or let someone scan the QR code.</p>
+        <h1>Ready to <span>share.</span></h1><p>Your file is uploaded. Share the link or let someone scan the QR code.</p>
       {% elif status == "expired" %}
-        <h1>This link has <span>expired.</span></h1>
-        <p>The expiry time has passed. Create a new share from the home page to make the file available again.</p>
+        <h1>This link has <span>expired.</span></h1><p>The expiry time has passed. Create a new share to make the file available again.</p>
       {% elif status == "limit" %}
-        <h1>Share limit <span>reached.</span></h1>
-        <p>This file has reached its configured number of successful downloads.</p>
+        <h1>Share limit <span>reached.</span></h1><p>This file has reached its configured number of successful downloads.</p>
+      {% elif status == "revoked" %}
+        <h1>Share <span>revoked.</span></h1><p>The owner revoked this link. Downloads through QuickShare are now disabled.</p>
       {% else %}
-        <h1>Share status <span>unavailable.</span></h1>
-        <p>We couldn't verify this share. Please return home and try again.</p>
+        <h1>Share status <span>unavailable.</span></h1><p>We couldn't verify this share. Please return home and try again.</p>
       {% endif %}
     </div>
-    {% if status == "active" %}
-      <span class="status-pill status-active"><i></i> Link active</span>
-    {% elif status == "expired" %}
-      <span class="status-pill status-expired"><i></i> Expired</span>
-    {% elif status == "limit" %}
-      <span class="status-pill status-limit"><i></i> Limit reached</span>
-    {% else %}
-      <span class="status-pill status-expired"><i></i> Unavailable</span>
-    {% endif %}
+    {% if status == "active" %}<span class="status-pill status-active"><i></i> Link active</span>
+    {% elif status == "expired" %}<span class="status-pill status-expired"><i></i> Expired</span>
+    {% elif status == "limit" %}<span class="status-pill status-limit"><i></i> Limit reached</span>
+    {% elif status == "revoked" %}<span class="status-pill status-expired"><i></i> Revoked</span>
+    {% else %}<span class="status-pill status-expired"><i></i> Unavailable</span>{% endif %}
   </div>
 
   {% if error == "expired" %}
     <div class="inline-alert alert-warning"><span aria-hidden="true">◷</span><span>This sharing link has expired.</span></div>
   {% elif error == "limit" %}
     <div class="inline-alert alert-warning"><span aria-hidden="true">⇩</span><span>The maximum number of successful downloads has been reached.</span></div>
+  {% elif error == "revoked" %}
+    <div class="inline-alert alert-warning"><span aria-hidden="true">⊘</span><span>The owner revoked this share.</span></div>
   {% elif error == "storage" %}
     <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The file could not be retrieved from GitHub storage. Check connectivity and try again.</span></div>
   {% elif error == "not_found" %}
@@ -47,44 +42,33 @@
   <div class="share-layout">
     <section class="card file-card">
       <div class="file-card-top">
-        <span class="large-file-icon" aria-hidden="true">
-          <svg viewBox="0 0 44 52" fill="none"><path d="M8 2h18l12 12v33a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M26 2v13h12M12 28h18M12 35h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
-        </span>
+        <span class="large-file-icon" aria-hidden="true"><svg viewBox="0 0 44 52" fill="none"><path d="M8 2h18l12 12v33a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M26 2v13h12M12 28h18M12 35h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
         <div class="file-heading">
-          <span class="section-kicker">SHARED FILE</span>
-          <h2 title="{{ file.original_filename }}">{{ file.original_filename }}</h2>
+          <span class="section-kicker">SHARED FILE</span><h2 title="{{ file.original_filename }}">{{ file.original_filename }}</h2>
           <p>{{ "%.2f"|format(file.file_size / 1024) }} KB <span class="meta-dot">•</span> Uploaded <time data-format-date datetime="{{ file.upload_time }}">{{ file.upload_time }}</time></p>
         </div>
       </div>
-
       {% if status == "active" %}
         <div class="share-url-block">
           <label for="share-url">Your share link</label>
-          <div class="copy-row">
-            <input id="share-url" type="text" value="{{ share_url }}" readonly aria-label="Share URL">
-            <button class="btn btn-copy" type="button" data-copy-target="share-url"><span aria-hidden="true">▢</span> Copy link</button>
-          </div>
+          <div class="copy-row"><input id="share-url" type="text" value="{{ share_url }}" readonly aria-label="Share URL"><button class="btn btn-copy" type="button" data-copy-target="share-url"><span aria-hidden="true">▢</span> Copy link</button></div>
           <p class="microcopy" id="copy-hint">Anyone with this link can open the share page.</p>
         </div>
-
         <div class="file-actions">
           <a class="btn btn-primary action-download" href="{{ url_for('download', share_id=file.share_id) }}"><span aria-hidden="true">↓</span> Download file <span class="btn-arrow" aria-hidden="true">↗</span></a>
           <a class="btn btn-secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download><span aria-hidden="true">▦</span> Save QR code</a>
         </div>
+        <div class="owner-actions"><span class="owner-hint" id="owner-hint">Share owner controls are available in the browser that created this share.</span><button class="btn btn-danger" type="button" id="revoke-current-share" data-share-id="{{ file.share_id }}" hidden>Revoke this link</button></div>
       {% else %}
         <div class="share-unavailable">
-          <span class="unavailable-icon" aria-hidden="true">{% if status == "expired" %}◷{% else %}✓{% endif %}</span>
-          <div><strong>{% if status == "expired" %}This share is no longer active{% elif status == "limit" %}All downloads used{% else %}This share is unavailable{% endif %}</strong><p>Go back to QuickShare to upload a file and create a new link.</p></div>
+          <span class="unavailable-icon" aria-hidden="true">{% if status == "expired" %}◷{% elif status == "revoked" %}⊘{% else %}✓{% endif %}</span>
+          <div><strong>{% if status == "expired" %}This share has expired{% elif status == "revoked" %}This share was revoked{% elif status == "limit" %}All downloads used{% else %}This share is unavailable{% endif %}</strong><p>Go back to QuickShare to upload a file and create a new link.</p></div>
           <a class="btn btn-secondary" href="{{ url_for('index') }}">Create a new share</a>
         </div>
       {% endif %}
     </section>
-
     <aside class="card qr-card">
-      <div class="qr-card-heading">
-        <div><div class="section-kicker">SCAN TO OPEN</div><h2>Share with a scan</h2></div>
-        <span class="qr-badge" aria-hidden="true">⌗</span>
-      </div>
+      <div class="qr-card-heading"><div><div class="section-kicker">SCAN TO OPEN</div><h2>Share with a scan</h2></div><span class="qr-badge" aria-hidden="true">⌗</span></div>
       {% if status == "active" %}
         <div class="qr-frame"><img src="{{ url_for('qr_image', share_id=file.share_id) }}" alt="QR code that opens this file's share page"></div>
         <p class="qr-caption">Open your camera, scan this code, and tap the link to access the share page.</p>
@@ -100,7 +84,15 @@
     <article class="metric-card"><span class="metric-icon metric-mint" aria-hidden="true">◷</span><div><span class="metric-label">LINK EXPIRY</span><strong><time data-format-date datetime="{{ file.expiry_time }}">{{ file.expiry_time }}</time></strong><span class="metric-foot">Displayed in your local time</span></div></article>
     <article class="metric-card"><span class="metric-icon metric-violet" aria-hidden="true">↗</span><div><span class="metric-label">SHARE ID</span><strong class="share-id">{{ file.share_id[:8] }}…</strong><span class="metric-foot">Unique file reference</span></div></article>
   </section>
-
-  <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>About public storage</strong><p>This prototype stores files and share metadata in a public GitHub repository. Link expiry and download limits apply only through QuickShare; direct GitHub access may bypass them. Never upload sensitive files.</p></div></div>
+  <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>About public storage</strong><p>This prototype stores files and share metadata in a public GitHub repository. Link expiry and download limits apply only through QuickShare; direct GitHub access may bypass them. Revocation blocks QuickShare downloads; cleanup removes the current-branch file but cannot erase Git history. Never upload sensitive files.</p></div></div>
 </section>
+
+{% if owner_token %}
+<script id="quickshare-created-share" type="application/json">{{ {
+  "share_id": file.share_id,
+  "owner_token": owner_token,
+  "filename": file.original_filename,
+  "upload_time": file.upload_time
+}|tojson }}</script>
+{% endif %}
 {% endblock %}
