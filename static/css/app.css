@@ -417,3 +417,305 @@ input[type="password"]::placeholder { color: #7182a3; }
   .account-chip { display: none; }
   .google-login-cta { padding: 9px 10px; font-size: 10px; }
 }
+
+
+/* ── Focused, low-friction homepage refinement ───────────────────────── */
+.hero-compact {
+  display: block;
+  padding: 37px 0 27px;
+}
+.hero-compact .hero-copy {
+  max-width: 790px;
+}
+.hero-compact .eyebrow {
+  padding: 7px 10px;
+  font-size: 9px;
+  letter-spacing: 1.25px;
+}
+.hero-compact h1 {
+  max-width: 850px;
+  margin: 16px 0 12px;
+  font-size: clamp(39px, 4.3vw, 54px);
+  line-height: 1.06;
+  letter-spacing: -2.5px;
+}
+.hero-compact h1 span {
+  color: #98adff;
+}
+.hero-compact .hero-lede {
+  max-width: 660px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  line-height: 1.75;
+}
+.hero-compact .hero-points {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 9px 18px;
+  margin: 17px 0 0;
+  color: #bdc9e0;
+  font-size: 11px;
+}
+.hero-compact .hero-points > span {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+}
+.hero-compact .point-check {
+  width: 16px;
+  height: 16px;
+  margin-right: 4px;
+}
+.workspace-grid-focused {
+  grid-template-columns: minmax(0, 1.15fr) minmax(290px, .75fr);
+  align-items: start;
+  gap: 17px;
+  padding-bottom: 42px;
+}
+.workspace-grid-focused .upload-card {
+  padding: clamp(21px, 2.6vw, 29px);
+}
+.workspace-grid-focused .section-heading {
+  align-items: center;
+  margin-bottom: 18px;
+}
+.workspace-grid-focused .section-heading h2 {
+  margin-top: 6px;
+  font-size: 23px;
+}
+.workspace-grid-focused .dropzone {
+  min-height: 190px;
+  justify-content: center;
+  padding: 24px 16px 19px;
+}
+.workspace-grid-focused .upload-symbol {
+  width: 43px;
+  height: 43px;
+  margin-bottom: 11px;
+}
+.workspace-grid-focused .upload-symbol svg {
+  width: 25px;
+  height: 25px;
+}
+.workspace-grid-focused .form-options {
+  margin-top: 18px;
+}
+.workspace-grid-focused .field > label {
+  min-height: 17px;
+  line-height: 1.45;
+}
+.options-helper {
+  margin: 10px 0 0;
+  color: #8394b4;
+  font-size: 10px;
+  line-height: 1.6;
+}
+.workspace-grid-focused .btn-submit {
+  min-height: 47px;
+  margin-top: 16px;
+}
+.workspace-grid-focused .form-footnote {
+  margin-top: 10px;
+}
+.signed-in-dot {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  margin-right: 5px;
+  border-radius: 50%;
+  background: #79ead7;
+  box-shadow: 0 0 0 3px rgba(121,234,215,.09);
+}
+.workspace-grid-focused .how-card {
+  padding: 23px 22px 15px;
+}
+.workspace-grid-focused .how-card h2 {
+  margin: 7px 0 14px;
+  font-size: 21px;
+}
+.workspace-grid-focused .how-step {
+  grid-template-columns: 35px minmax(0,1fr);
+  gap: 11px;
+  padding: 13px 0;
+}
+.workspace-grid-focused .how-icon {
+  width: 35px;
+  height: 35px;
+  border-radius: 10px;
+}
+.workspace-grid-focused .how-number {
+  display: none;
+}
+.workspace-grid-focused .privacy-note {
+  padding: 14px;
+}
+.workspace-grid-focused .mini-stats {
+  gap: 8px;
+}
+.workspace-grid-focused .mini-stats > div {
+  padding: 12px 9px;
+}
+.workspace-grid-focused .mini-stats strong {
+  font-size: 14px;
+}
+.workspace-grid-focused .mini-stats span {
+  font-size: 9px;
+}
+.step-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.login-gate {
+  padding: 22px;
+}
+.login-gate p {
+  max-width: 410px;
+  line-height: 1.75;
+}
+.login-gate .btn-google {
+  max-width: 330px;
+}
+.login-gate-foot {
+  line-height: 1.7;
+}
+
+/* Make navigation and shared pages feel part of one product. */
+.topbar {
+  min-height: 76px;
+}
+.brand-mark {
+  width: 38px;
+  height: 38px;
+  border-radius: 12px;
+}
+.brand-copy {
+  font-size: 16px;
+}
+.top-nav {
+  gap: 21px;
+}
+.top-nav a {
+  transition: color .16s ease, background .16s ease;
+}
+.top-nav a:hover {
+  color: #f4f7ff;
+}
+.account-chip {
+  max-width: 190px;
+}
+.account-name {
+  max-width: 120px;
+}
+.share-page, .dashboard-page {
+  padding-top: 32px;
+}
+.file-card, .qr-card, .dashboard-library {
+  box-shadow: 0 12px 40px rgba(0,0,0,.1);
+}
+.share-head p {
+  max-width: 620px;
+}
+.file-heading h2 {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+}
+.site-footer {
+  min-height: 65px;
+}
+@media (min-width: 1200px) {
+  .hero-compact {
+    padding-top: 34px;
+    padding-bottom: 22px;
+  }
+  .hero-compact h1 {
+    font-size: 49px;
+  }
+}
+@media (max-width: 900px) {
+  .workspace-grid-focused {
+    grid-template-columns: minmax(0, 1fr) minmax(265px, .8fr);
+    gap: 13px;
+  }
+  .hero-compact {
+    padding: 31px 0 23px;
+  }
+  .hero-compact h1 {
+    font-size: clamp(37px, 5vw, 47px);
+  }
+}
+@media (max-width: 700px) {
+  .topbar {
+    min-height: 68px;
+  }
+  .top-nav {
+    gap: 9px;
+  }
+  .top-nav > a[href*="how-it-works"] {
+    display: none;
+  }
+  .hero-compact {
+    padding: 31px 0 23px;
+  }
+  .hero-compact h1 {
+    margin-top: 15px;
+    font-size: clamp(36px, 10vw, 47px);
+    letter-spacing: -2px;
+  }
+  .hero-compact .hero-lede {
+    max-width: 100%;
+    font-size: 12px;
+  }
+  .hero-compact .hero-points {
+    display: grid;
+    gap: 8px;
+    margin-top: 14px;
+  }
+  .workspace-grid-focused {
+    grid-template-columns: 1fr;
+    gap: 13px;
+    padding-bottom: 32px;
+  }
+  .workspace-grid-focused .upload-card {
+    padding: 20px;
+  }
+  .workspace-grid-focused .dropzone {
+    min-height: 175px;
+  }
+  .workspace-grid-focused .section-heading h2 {
+    font-size: 21px;
+  }
+  .workspace-grid-focused .form-options {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .workspace-grid-focused .field > label {
+    min-height: 0;
+  }
+  .workspace-grid-focused .side-column {
+    gap: 12px;
+  }
+  .workspace-grid-focused .mini-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+  .account-name {
+    max-width: 72px;
+  }
+  .share-page, .dashboard-page {
+    padding-top: 24px;
+  }
+}
+@media (max-width: 380px) {
+  .hero-compact h1 {
+    font-size: 35px;
+  }
+  .workspace-grid-focused .upload-card {
+    padding: 16px;
+  }
+  .workspace-grid-focused .section-heading {
+    gap: 8px;
+  }
+  .step-badge {
+    font-size: 9px;
+  }
+}
