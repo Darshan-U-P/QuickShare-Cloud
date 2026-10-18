@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#0b1020">
+  <meta name="description" content="QuickShare Cloud — share small files with a QR code, expiring links and download controls.">
+  <title>{% block title %}QuickShare Cloud{% endblock %}</title>
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css') }}">
+</head>
+<body>
+  <div class="ambient ambient-a" aria-hidden="true"></div>
+  <div class="ambient ambient-b" aria-hidden="true"></div>
+  <div class="site-shell">
+    <header class="topbar">
+      <a class="brand" href="{{ url_for('index') }}" aria-label="QuickShare Cloud home">
+        <span class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none"><path d="M8 22.5 22.8 7.7M11 7.7h11.8v11.8" stroke="currentColor" stroke-width="2.8" stroke-linecap="round" stroke-linejoin="round"/><path d="M6.8 15.4v9.8a.9.9 0 0 0 .9.9h9.8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg>
+        </span>
+        <span class="brand-copy">QuickShare<span>Cloud</span></span>
+      </a>
+      <nav class="top-nav" aria-label="Main navigation">
+        <a href="{{ url_for('index') }}#how-it-works">How it works</a>
+        <a class="nav-cta" href="{{ url_for('index') }}#upload">Share a file <span aria-hidden="true">↗</span></a>
+      </nav>
+    </header>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% if messages %}
+        <div class="flash-stack" role="status" aria-live="polite">
+          {% for category, message in messages %}
+            <div class="flash flash-{{ category if category in ['success', 'error'] else 'info' }}">
+              <span class="flash-icon" aria-hidden="true">{% if category == 'success' %}✓{% else %}!{% endif %}</span>
+              <span>{{ message }}</span>
+              <button class="flash-dismiss" type="button" aria-label="Dismiss message">×</button>
+            </div>
+          {% endfor %}
+        </div>
+      {% endif %}
+    {% endwith %}
+
+    <main id="main-content">
+      {% block content %}{% endblock %}
+    </main>
+
+    <footer class="site-footer">
+      <a class="footer-brand" href="{{ url_for('index') }}">QuickShare Cloud</a>
+      <span>Built for quick, simple file sharing.</span>
+      <a href="https://github.com/Darshan-U-P/QuickShare-Cloud" target="_blank" rel="noopener noreferrer">Project source ↗</a>
+    </footer>
+  </div>
+  <div class="toast" id="toast" role="status" aria-live="polite"></div>
+  <script src="{{ url_for('static', filename='js/app.js') }}" defer></script>
+</body>
+</html>
