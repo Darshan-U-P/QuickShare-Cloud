@@ -6,7 +6,7 @@
     <div>
       <div class="section-kicker">YOUR FILE LIBRARY</div>
       <h1>My <span>Shares.</span></h1>
-      <p>Links saved in this browser, with their current status and download activity.</p>
+      <p>All shares created by your Google account, with their latest status and download activity.</p>
     </div>
     <a class="btn btn-primary" href="{{ url_for('index') }}#upload">+ Share a new file</a>
   </div>
@@ -17,7 +17,7 @@
   </div>
   <section class="card dashboard-library">
     <div class="library-heading">
-      <div><h2>Your file links</h2><p>History is saved in this browser, not synced between devices.</p></div>
+      <div><h2>Your file links</h2><p>Your share list follows your Google account when you sign in.</p></div>
       <button class="btn btn-secondary" id="refresh-shares" type="button">Refresh status ↻</button>
     </div>
     <div class="library-tools">
@@ -34,10 +34,10 @@
     <div class="empty-state" id="shares-empty" hidden>
       <span class="empty-icon">▤</span>
       <h3 id="empty-title">No shares saved yet</h3>
-      <p id="empty-description">Upload a file to create a link. It will appear here in this browser.</p>
+      <p id="empty-description">Upload a file to create a link. It will appear here whenever you sign in to this account.</p>
       <a class="btn btn-primary" href="{{ url_for('index') }}#upload">Share your first file ↗</a>
     </div>
   </section>
-  <div class="dashboard-note"><span aria-hidden="true">ⓘ</span><p>Only shares created in this browser after owner controls were added can be revoked here. Clearing browser storage loses this list. The public GitHub repository remains directly accessible, so revocation cannot make a previously public file private.</p></div>
+  <div class="dashboard-note"><span aria-hidden="true">ⓘ</span><p>Only shares created by your signed-in Google account can be managed here. Share metadata is stored in GitHub, but the repository is public: revocation blocks QuickShare downloads, not direct GitHub access. Cleanup does not erase Git history.</p></div>
 </section>
 {% endblock %}
