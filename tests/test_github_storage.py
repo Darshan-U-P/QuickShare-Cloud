@@ -153,6 +153,8 @@ def test_cleanup_deletes_expired_current_revision_and_marks_metadata(monkeypatch
     current = copy.deepcopy(metadata)
 
     monkeypatch.setattr(storage, "_list_metadata_names", lambda: [share_id])
+    monkeypatch.setattr(storage, "_get_cleanup_cursor", lambda: "")
+    monkeypatch.setattr(storage, "_set_cleanup_cursor", lambda _sid: None)
     monkeypatch.setattr(storage, "get_share_metadata", lambda _sid: copy.deepcopy(current))
     monkeypatch.setattr(storage, "delete_storage_file", lambda _path: "deleted")
 
