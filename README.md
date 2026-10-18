@@ -1,54 +1,64 @@
 # QuickShare Cloud
 
-A college Cloud Computing mini-project for QR-code-based file sharing with browser-local share history, revocation, activity analytics, expiry enforcement, and scheduled cleanup.
+A college Cloud Computing mini-project for QR-code-based file sharing with Google sign-in, account-scoped share management, analytics, expiry enforcement, revocation, and scheduled cleanup.
 
 ## Features
 
-- Upload files up to 3 MB to a separate public GitHub storage repository.
-- Generate share pages and QR codes.
-- Save newly created shares and their management token in the creator's browser localStorage.
-- My Shares dashboard with search, status filters, copy-link and QR downloads.
-- Owner-authorized link revocation and recent access/download activity.
-- Server-side expiry and download-limit checks with optimistic GitHub SHA updates.
-- Daily Vercel Cron cleanup of expired/revoked files from the current branch.
-- Upload validation, security response headers, API rate-limit errors, and automated tests.
+- Google OpenID Connect sign-in using Authlib; verified Google email is required.
+- Uploads limited to 3 MB and restricted file-extension validation.
+- Files and share metadata stored in a separate public GitHub repository.
+- QR-code share pages that recipients can open without having a QuickShare account.
+- My Shares dashboard scoped to the signed-in Google account, with search, filters, links, QR downloads, and activity history.
+- Server-side revocation, expiration, download-limit checks, and recent download/access event logging.
+- Protected daily Vercel Cron cleanup for expired/revoked file entries.
+- CSRF checks for authenticated state-changing requests, security response headers, GitHub API rate-limit handling, and tests.
 
 ## Local setup
 
-1. Create and activate a Python virtual environment.
-2. Install dependencies with `pip install -r requirements-dev.txt`.
-3. Copy `.env.example` to `.env` and set your local token and secret values.
-4. Run `python app.py`.
+1. Install Python 3.10 or newer.
+2. Create and activate a virtual environment.
+3. Install dependencies: `pip install -r requirements-dev.txt`.
+4. Copy `.env.example` to `.env`; set GitHub and Google OAuth values.
+5. Configure the Google OAuth web client with this local redirect URI: `http://127.0.0.1:5000/auth/google/callback`.
+6. Run `python app.py`.
 
 Never commit `.env`. Use a fine-grained GitHub token restricted to `QuickShare-Storage`, with Contents: Read and write permission.
 
-## Vercel setup
+## Google OAuth setup
 
-Vercel detects the Flask app from root-level `app.py`. Set these Production Environment Variables in Vercel:
+In Google Cloud Console, create a project and configure the OAuth consent screen / Google Auth Platform. Create an OAuth client of type **Web application**. Add the exact local and deployed callback addresses under **Authorized redirect URIs**:
+
+- Local: `http://127.0.0.1:5000/auth/google/callback`
+- Production: `https://YOUR-STABLE-VERCEL-DOMAIN/auth/google/callback`
+
+The production value must match `GOOGLE_REDIRECT_URI` exactly, including scheme, host, path, and trailing-slash choice. Use the stable Production domain shown under Vercel → Project → Settings → Domains, not an ephemeral deployment-preview URL. If the consent screen is in Testing mode, add the intended Google accounts as Test users.
+
+Set the following Production Environment Variables in Vercel:
 
 - `GITHUB_TOKEN`
 - `GITHUB_OWNER` = `Darshan-U-P`
 - `GITHUB_REPO` = `QuickShare-Storage`
 - `GITHUB_BRANCH` = `main`
-- `SECRET_KEY` = a new random value
-- `CRON_SECRET` = a random secret with at least 16 characters
+- `GOOGLE_CLIENT_ID`
+- `GOOGLE_CLIENT_SECRET`
+- `GOOGLE_REDIRECT_URI` = the exact production callback address above
+- `SECRET_KEY` = a random Flask session secret
+- `OWNER_HASH_SECRET` = a separate random secret; keep it stable across deployments
+- `CRON_SECRET` = a separate random bearer secret
 - `FLASK_DEBUG` = `0`
 - `MAX_CONTENT_LENGTH_MB` = `3`
-- `UPLOAD_PASSWORD` = a long random passphrase known only to trusted uploaders
 
-The public upload endpoint is disabled on Vercel unless `UPLOAD_PASSWORD` is set. If configured, the upload form requires that passphrase; give it only to trusted uploaders. The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Cron calls this endpoint using the `Authorization: Bearer <CRON_SECRET>` header. Hobby schedules run once per day and are not guaranteed to fire at the exact minute. After adding `CRON_SECRET`, redeploy so the function and cron configuration are refreshed.
+Do not put OAuth client secrets or GitHub tokens in source code or in `.env.example`. After configuring variables, redeploy the application.
 
-## My Shares and owner controls
+## Account ownership
 
-The high-entropy owner-management token is delivered only to the browser that creates a share, then stored in that browser's localStorage. It is not placed in the share URL. Clearing browser storage loses the management capability. Shares created before owner controls were introduced do not have a management token and cannot be revoked in the dashboard.
+A verified Google account is required to upload and manage files. Recipient-facing share pages and authorized downloads remain public to anyone holding a share link. Each new metadata record stores a keyed hash of the Google subject, not the Google email address. My Shares lists only records belonging to the current signed-in account. Shares created before Google ownership was added are not automatically claimed by any account and will not appear in My Shares.
 
-Share metadata (including the hash of the owner token and recent activity events) is stored as JSON files in the public GitHub repository. Treat all repository contents as public. Never upload sensitive files.
+## Important limitations
 
-## Limitations
-
-- GitHub's Contents API is a low-traffic prototype backend, not a transactional database. Optimistic SHA conflict checks reduce concurrent counter races but are not production-grade.
-- Expiry and download limits apply only to QuickShare requests. The files in the public GitHub repository remain directly accessible.
-- Cleanup removes file content from the current branch and marks metadata; it does not erase older Git history.
-- Cleanup is scheduled daily and processes a bounded number of expired/revoked files per run.
-- The browser-local My Shares list does not synchronize across devices.
+- **The GitHub storage repository is public.** Files and metadata in it must be treated as public. QuickShare's expiry/revocation/download limits cannot stop direct GitHub access.
+- Cleanup deletes the file from the current branch revision but does not erase earlier Git history.
+- GitHub's Contents API is a low-traffic prototype backend, not a transactional database. SHA-based conflict retry helps, but the service is not production-grade under high concurrency.
+- My Shares depends on GitHub metadata reads; more shares mean more API requests and can run into GitHub rate limits.
 - The 3 MB cap leaves room under Vercel Functions' request/response payload limit.
+- The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Hobby cron runs once daily; exact execution minute is not guaranteed.
