@@ -40,3 +40,4 @@ The GitHub repository is public, including uploaded files and JSON metadata. Do 
 ## Notes
 
 Vercel Functions have a read-only filesystem apart from temporary storage, so this app does not rely on local SQLite for persistent share metadata. Vercel also limits request and response bodies to 4.5 MB; the app's 3 MB cap leaves room for multipart overhead.
+
