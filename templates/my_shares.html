@@ -1,0 +1,43 @@
+{% extends "base.html" %}
+{% block title %}My Shares · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="dashboard-page">
+  <div class="dashboard-heading">
+    <div>
+      <div class="section-kicker">YOUR FILE LIBRARY</div>
+      <h1>My <span>Shares.</span></h1>
+      <p>Links saved in this browser, with their current status and download activity.</p>
+    </div>
+    <a class="btn btn-primary" href="{{ url_for('index') }}#upload">+ Share a new file</a>
+  </div>
+  <div class="dashboard-stats">
+    <article class="dashboard-stat"><span class="dashboard-stat-icon stat-indigo">▤</span><div><span>FILES TRACKED</span><strong id="stat-total">—</strong></div></article>
+    <article class="dashboard-stat"><span class="dashboard-stat-icon stat-mint">⇩</span><div><span>TOTAL DOWNLOADS</span><strong id="stat-downloads">—</strong></div></article>
+    <article class="dashboard-stat"><span class="dashboard-stat-icon stat-amber">◷</span><div><span>ACTIVE LINKS</span><strong id="stat-active">—</strong></div></article>
+  </div>
+  <section class="card dashboard-library">
+    <div class="library-heading">
+      <div><h2>Your file links</h2><p>History is saved in this browser, not synced between devices.</p></div>
+      <button class="btn btn-secondary" id="refresh-shares" type="button">Refresh status ↻</button>
+    </div>
+    <div class="library-tools">
+      <label class="search-box"><span aria-hidden="true">⌕</span><input id="share-search" type="search" placeholder="Search your shares…" aria-label="Search shares"></label>
+      <div class="filter-tabs" role="group" aria-label="Filter shares">
+        <button type="button" class="filter-tab is-active" data-filter="all">All</button>
+        <button type="button" class="filter-tab" data-filter="active">Active</button>
+        <button type="button" class="filter-tab" data-filter="expired">Expired</button>
+        <button type="button" class="filter-tab" data-filter="revoked">Revoked</button>
+      </div>
+    </div>
+    <div class="library-loading" id="shares-loading"><span class="loading-spinner"></span> Loading saved shares…</div>
+    <div class="share-list" id="shares-list" aria-live="polite"></div>
+    <div class="empty-state" id="shares-empty" hidden>
+      <span class="empty-icon">▤</span>
+      <h3 id="empty-title">No shares saved yet</h3>
+      <p id="empty-description">Upload a file to create a link. It will appear here in this browser.</p>
+      <a class="btn btn-primary" href="{{ url_for('index') }}#upload">Share your first file ↗</a>
+    </div>
+  </section>
+  <div class="dashboard-note"><span aria-hidden="true">ⓘ</span><p>Only shares created in this browser after owner controls were added can be revoked here. Clearing browser storage loses this list. The public GitHub repository remains directly accessible, so revocation cannot make a previously public file private.</p></div>
+</section>
+{% endblock %}
