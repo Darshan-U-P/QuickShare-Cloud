@@ -5,7 +5,7 @@ A college Cloud Computing mini-project for QR-code-based file sharing with Googl
 ## Features
 
 - Google OpenID Connect sign-in using Authlib; verified Google email is required.
-- Uploads limited to 3 MB and restricted file-extension validation.
+- Uploads limited to 4 MB and restricted file-extension validation.
 - Files and share metadata stored in a separate public GitHub repository.
 - QR-code share pages that recipients can open without having a QuickShare account.
 - My Shares dashboard scoped to the signed-in Google account, with search, filters, links, QR downloads, and activity history.
@@ -46,7 +46,7 @@ Set the following Production Environment Variables in Vercel:
 - `OWNER_HASH_SECRET` = a separate random secret; keep it stable across deployments
 - `CRON_SECRET` = a separate random bearer secret
 - `FLASK_DEBUG` = `0`
-- `MAX_CONTENT_LENGTH_MB` = `3`
+- `MAX_CONTENT_LENGTH_MB` = `4`
 
 Do not put OAuth client secrets or GitHub tokens in source code or in `.env.example`. After configuring variables, redeploy the application.
 
@@ -60,5 +60,5 @@ A verified Google account is required to upload and manage files. Recipient-faci
 - Cleanup deletes the file from the current branch revision but does not erase earlier Git history.
 - GitHub's Contents API is a low-traffic prototype backend, not a transactional database. SHA-based conflict retry helps, but the service is not production-grade under high concurrency.
 - My Shares depends on GitHub metadata reads; more shares mean more API requests and can run into GitHub rate limits.
-- The 3 MB cap leaves room under Vercel Functions' request/response payload limit.
+- The 4 MiB cap leaves a small margin under Vercel Functions' 4.5 MB request/response payload limit. Larger files require a direct-to-storage upload architecture.
 - The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Hobby cron runs once daily; exact execution minute is not guaranteed.
