@@ -10,7 +10,7 @@
       <span><span class="point-check">✓</span> Share page + direct download link</span>
       <span><span class="point-check">✓</span> QR code in one click</span>
       <span><span class="point-check">✓</span> Expiry and download limits</span>
-      <span><span class="point-check">✓</span> Up to 4 MB per file</span>
+      {% if google_drive_storage_ready %}<span><span class="point-check">✓</span> Up to {{ upload_limit_gb }} GB per file{% if not large_upload_allowed %} · 50 GB by approval{% endif %}</span>{% else %}<span><span class="point-check">✓</span> Up to 4 MB per file</span>{% endif %}
     </div>
   </div>
   <div class="hero-showcase" aria-label="Illustration of a file ready to share">
@@ -64,20 +64,31 @@
     {% else %}
       <form id="upload-form" action="{{ url_for('upload') }}" method="post" enctype="multipart/form-data">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <input id="file" name="file" type="file" required hidden>
+        <input id="file" name="file" type="file" required hidden
+          data-large-upload-allowed="{{ 'true' if large_upload_allowed else 'false' }}"
+          data-google-drive-ready="{{ 'true' if google_drive_storage_ready else 'false' }}"
+          data-standard-limit-bytes="{{ 5 * 1024**3 }}"
+          data-approved-limit-bytes="{{ 50 * 1024**3 }}"
+          data-github-limit-bytes="{{ 4 * 1024**2 }}">
         <label class="dropzone" id="dropzone" for="file" tabindex="0" role="button" aria-label="Choose a file or drag and drop it">
           <span class="upload-symbol" aria-hidden="true">
             <svg viewBox="0 0 48 48" fill="none"><path d="M24 31V9m0 0-8 8m8-8 8 8" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><path d="M10 29v9a2 2 0 0 0 2 2h24a2 2 0 0 0 2-2v-9" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"/></svg>
           </span>
           <strong id="file-prompt">Choose a file to upload</strong>
           <span id="file-detail">Drag and drop it here, or <span class="browse-link">browse files</span></span>
-          <span class="file-hint">Maximum 4 MB · PDF, images, documents and archives</span>
+          <span class="file-hint">{% if google_drive_storage_ready %}Up to {{ upload_limit_gb }} GB per file via Google Drive{% if not large_upload_allowed %} · 50 GB access requires approval{% endif %}{% else %}Maximum 4 MB via GitHub storage{% endif %} · PDF, images, documents and archives</span>
         </label>
 
         <div class="selected-file" id="selected-file" hidden>
           <span class="selected-file-icon" aria-hidden="true">↗</span>
           <span class="selected-file-copy"><strong id="selected-name"></strong><small id="selected-size"></small></span>
           <button class="remove-file" type="button" id="remove-file" aria-label="Remove selected file">×</button>
+        </div>
+
+        <div class="upload-progress" id="upload-progress" hidden aria-live="polite">
+          <div class="upload-progress-heading"><strong id="upload-progress-label">Preparing upload…</strong><span id="upload-progress-percent">0%</span></div>
+          <div class="upload-progress-track"><span id="upload-progress-bar"></span></div>
+          <p id="upload-progress-detail">Your file is sent directly to Google Drive in resumable chunks.</p>
         </div>
 
         <div class="field storage-provider-field">
@@ -166,7 +177,7 @@
     </div>
     <div class="mini-stats">
       <div><strong>₹0</strong><span>Extra storage service</span></div>
-      <div><strong>4 MB</strong><span>Upload limit</span></div>
+      <div><strong>{% if google_drive_storage_ready %}{{ upload_limit_gb }} GB{% else %}4 MB{% endif %}</strong><span>Per-file limit</span></div>
       <div><strong>QR</strong><span>Included</span></div>
     </div>
   </aside>
