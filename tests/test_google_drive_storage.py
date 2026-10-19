@@ -142,3 +142,66 @@ def test_verify_resumable_upload_rejects_wrong_size(monkeypatch):
             upload_nonce="nonce-xyz",
             expected_size=1024,
         )
+
+
+
+def test_resumable_chunk_forwards_small_range_and_returns_next_offset(monkeypatch):
+    seen = {}
+
+    def fake_put(url, headers, data, timeout):
+        seen.update(url=url, headers=headers, data=data, timeout=timeout)
+        return FakeResponse(308, headers={"Range": "bytes=0-3"})
+
+    monkeypatch.setattr(drive.requests, "put", fake_put)
+    result = drive.upload_resumable_chunk(
+        "https://www.googleapis.com/upload/drive/v3/files?upload_id=session",
+        start=0,
+        end=3,
+        total_size=100,
+        content=b"abcd",
+    )
+    assert result == {"complete": False, "next_offset": 4}
+    assert seen["url"].endswith("upload_id=session")
+    assert seen["headers"]["Content-Range"] == "bytes 0-3/100"
+    assert seen["headers"]["Content-Length"] == "4"
+    assert seen["data"] == b"abcd"
+
+
+def test_resumable_chunk_returns_completed_file(monkeypatch):
+    monkeypatch.setattr(
+        drive.requests,
+        "put",
+        lambda *_args, **_kwargs: FakeResponse(201, {"id": "completed-drive-file"}),
+    )
+    result = drive.upload_resumable_chunk(
+        "https://www.googleapis.com/upload/drive/v3/files?upload_id=session",
+        start=4,
+        end=7,
+        total_size=8,
+        content=b"efgh",
+    )
+    assert result["complete"] is True
+    assert result["next_offset"] == 8
+    assert result["file"]["id"] == "completed-drive-file"
+
+
+def test_resumable_chunk_recovers_when_previous_chunk_was_already_committed(monkeypatch):
+    calls = []
+
+    def fake_put(url, headers, data, timeout):
+        calls.append(headers.copy())
+        if len(calls) == 1:
+            return FakeResponse(400, {"error": "invalidRange"}, text="invalidRange")
+        return FakeResponse(308, headers={"Range": "bytes=0-7"})
+
+    monkeypatch.setattr(drive.requests, "put", fake_put)
+    result = drive.upload_resumable_chunk(
+        "https://www.googleapis.com/upload/drive/v3/files?upload_id=session",
+        start=0,
+        end=3,
+        total_size=100,
+        content=b"abcd",
+    )
+    assert result == {"complete": False, "next_offset": 8}
+    assert len(calls) == 2
+    assert calls[1]["Content-Range"] == "bytes */100"
