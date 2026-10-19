@@ -287,7 +287,7 @@ def upload_resumable_chunk(
 
     if response.status_code == 308:
         acknowledged_range = (getattr(response, "headers", {}) or {}).get("Range", "")
-        match = re.fullmatch(r"bytes=0-(\\d+)", acknowledged_range.strip())
+        match = re.fullmatch(r"bytes=0-(\d+)", acknowledged_range.strip())
         next_offset = int(match.group(1)) + 1 if match else 0
         if next_offset < 0 or next_offset > total_size:
             raise GoogleDriveStorageError("Google Drive returned an invalid resumable-upload offset.")
@@ -301,6 +301,37 @@ def upload_resumable_chunk(
         if not isinstance(payload, dict) or not payload.get("id"):
             raise GoogleDriveStorageError("Google Drive completed the upload without returning a file ID.")
         return {"complete": True, "next_offset": total_size, "file": payload}
+
+    # A previous chunk may have reached Drive even if Vercel's response was lost.
+    # If retrying that chunk returns 400, ask Drive for the committed offset before
+    # deciding whether this is a real upload error.
+    if response.status_code in (400, 404, 409):
+        try:
+            status_response = requests.put(
+                session_uri,
+                headers={
+                    "Content-Length": "0",
+                    "Content-Range": f"bytes */{total_size}",
+                },
+                data=b"",
+                timeout=(15, 30),
+            )
+        except requests.RequestException:
+            status_response = None
+        if status_response is not None:
+            if status_response.status_code == 308:
+                status_range = (getattr(status_response, "headers", {}) or {}).get("Range", "")
+                status_match = re.fullmatch(r"bytes=0-(\\d+)", status_range.strip())
+                committed_offset = int(status_match.group(1)) + 1 if status_match else 0
+                if 0 <= committed_offset <= total_size:
+                    return {"complete": False, "next_offset": committed_offset}
+            elif status_response.status_code in (200, 201):
+                try:
+                    payload = status_response.json()
+                except ValueError as exc:
+                    raise GoogleDriveStorageError("Google Drive completed the upload but returned invalid metadata.") from exc
+                if isinstance(payload, dict) and payload.get("id"):
+                    return {"complete": True, "next_offset": total_size, "file": payload}
 
     _raise_for_response(response, "uploading a resumable chunk")
     raise GoogleDriveStorageError(f"Google Drive returned unexpected HTTP {response.status_code} for a chunk.")
