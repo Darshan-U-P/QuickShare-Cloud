@@ -246,3 +246,26 @@ def test_download_dispatches_private_drive_share(monkeypatch):
     assert response.status_code == 200
     assert response.data == b"private file bytes"
     assert downloaded_ids == ["private-drive-file-id"]
+
+
+
+def test_connected_drive_is_default_but_github_remains_available(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    monkeypatch.setattr(app_module.google_drive_storage, "is_configured", lambda: True)
+    response = client.get("/")
+    assert response.status_code == 200
+    page = response.data.decode()
+    assert '<option value="google_drive" selected>Google Drive · Private shared storage</option>' in page
+    assert '<option value="github">GitHub · Public file storage</option>' in page
+
+
+def test_unconnected_drive_keeps_github_as_default(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    monkeypatch.setattr(app_module.google_drive_storage, "is_configured", lambda: False)
+    response = client.get("/")
+    assert response.status_code == 200
+    page = response.data.decode()
+    assert '<option value="github" selected>GitHub · Public file storage</option>' in page
+    assert '<option value="google_drive" disabled>Google Drive · Setup required</option>' in page
