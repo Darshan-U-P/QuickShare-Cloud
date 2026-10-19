@@ -324,8 +324,10 @@ def test_approved_account_can_initialize_upload_up_to_50_gb(monkeypatch):
         },
     )
     assert response.status_code == 200
-    assert response.json["chunk_size"] == 32 * 1024 * 1024
-    assert response.json["upload_session_url"].endswith("upload_id=test")
+    assert response.json["chunk_size"] == 4 * 1024 * 1024
+    assert "upload_session_url" not in response.json
+    ticket_data = app_module._upload_ticket_serializer().loads(response.json["upload_ticket"])
+    assert ticket_data["session_uri"].endswith("upload_id=test")
     assert seen[0]["file_size"] == 40 * 1024**3
 
 
@@ -487,3 +489,83 @@ def test_refresh_download_ticket_rejects_revoked_share(monkeypatch):
         json={"ticket": ticket},
     )
     assert response.status_code == 410
+
+
+
+def test_upload_chunk_is_forwarded_from_vercel_to_drive(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    metadata = {
+        "share_id": "a" * 32,
+        "original_filename": "large.bin",
+        "storage_path": "files/" + "a" * 32 + ".bin",
+        "storage_provider": "google_drive",
+        "file_size": 1024,
+        "upload_time": datetime.now(timezone.utc).isoformat(),
+        "expiry_time": (datetime.now(timezone.utc) + timedelta(hours=1)).isoformat(),
+        "max_downloads": 3,
+        "download_count": 0,
+        "downloads": [],
+        "owner_id_hash": expected_owner_hash(),
+        "revoked": False,
+    }
+    token = app_module._upload_ticket_serializer().dumps({
+        "metadata": metadata,
+        "upload_nonce": "upload-nonce",
+        "session_uri": "https://www.googleapis.com/upload/drive/v3/files?upload_id=unit-test",
+    })
+    forwarded = []
+
+    def fake_forward(session_uri, **kwargs):
+        forwarded.append((session_uri, kwargs))
+        return {"complete": False, "next_offset": 4}
+
+    monkeypatch.setattr(app_module.google_drive_storage, "upload_resumable_chunk", fake_forward)
+    response = client.post(
+        "/api/uploads/chunk",
+        data=b"abcd",
+        headers={
+            "X-CSRF-Token": "csrf-test-token-which-is-long-enough",
+            "X-Upload-Ticket": token,
+            "Content-Type": "application/octet-stream",
+            "Content-Range": "bytes 0-3/1024",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json == {"complete": False, "next_offset": 4}
+    assert forwarded[0][0].endswith("upload_id=unit-test")
+    assert forwarded[0][1]["start"] == 0
+    assert forwarded[0][1]["end"] == 3
+    assert forwarded[0][1]["total_size"] == 1024
+    assert forwarded[0][1]["content"] == b"abcd"
+
+
+def test_upload_chunk_rejects_malformed_range_before_forwarding(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    metadata = {
+        "share_id": "a" * 32,
+        "file_size": 1024,
+        "owner_id_hash": expected_owner_hash(),
+    }
+    token = app_module._upload_ticket_serializer().dumps({
+        "metadata": metadata,
+        "upload_nonce": "upload-nonce",
+        "session_uri": "https://www.googleapis.com/upload/drive/v3/files?upload_id=unit-test",
+    })
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "upload_resumable_chunk",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("invalid range must not reach Drive")),
+    )
+    response = client.post(
+        "/api/uploads/chunk",
+        data=b"abcd",
+        headers={
+            "X-CSRF-Token": "csrf-test-token-which-is-long-enough",
+            "X-Upload-Ticket": token,
+            "Content-Type": "application/octet-stream",
+            "Content-Range": "invalid",
+        },
+    )
+    assert response.status_code == 400
