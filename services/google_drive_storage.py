@@ -205,6 +205,112 @@ def upload_file_bytes(storage_path: str, content: bytes, share_id: str) -> dict:
         raise GoogleDriveStorageError("Google Drive returned an invalid upload response.") from exc
 
 
+
+def initiate_resumable_upload(
+    storage_path: str,
+    share_id: str,
+    upload_nonce: str,
+    file_size: int,
+    mime_type: str,
+) -> str:
+    """Create a Drive resumable-upload session without relaying file bytes through Vercel."""
+    folder_id = _ensure_folder()
+    metadata = {
+        "name": f"QuickShare {storage_path.rsplit('/', 1)[-1]}",
+        "mimeType": mime_type or "application/octet-stream",
+        "parents": [folder_id],
+        "appProperties": {
+            "quickshareShareId": share_id,
+            "quickshareUploadNonce": upload_nonce,
+        },
+    }
+    try:
+        response = requests.post(
+            f"{DRIVE_UPLOAD_API}/files",
+            headers={
+                **_headers(),
+                "Content-Type": "application/json; charset=UTF-8",
+                "X-Upload-Content-Type": mime_type or "application/octet-stream",
+                "X-Upload-Content-Length": str(int(file_size)),
+            },
+            params={"uploadType": "resumable"},
+            json=metadata,
+            timeout=30,
+        )
+    except requests.RequestException as exc:
+        raise GoogleDriveStorageError("Could not start a resumable Google Drive upload.") from exc
+    _raise_for_response(response, "starting a resumable upload")
+    session_uri = (getattr(response, "headers", {}) or {}).get("Location", "")
+    if not isinstance(session_uri, str) or not session_uri.startswith("https://www.googleapis.com/upload/drive/v3/files?"):
+        raise GoogleDriveStorageError("Google Drive did not return a valid resumable-upload session.")
+    return session_uri
+
+
+def verify_resumable_upload(
+    file_id: str,
+    *,
+    share_id: str,
+    upload_nonce: str,
+    expected_size: int,
+) -> dict:
+    """Verify that the browser completed the exact private file initialized by QuickShare."""
+    if not isinstance(file_id, str) or not file_id.strip():
+        raise GoogleDriveStorageError("Google Drive did not return a completed file ID.")
+    try:
+        response = requests.get(
+            f"{DRIVE_API}/files/{quote(file_id.strip(), safe='')}",
+            headers=_headers(),
+            params={"fields": "id,name,mimeType,size,parents,appProperties,trashed"},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise GoogleDriveStorageError("Could not verify the uploaded file in Google Drive.") from exc
+    _raise_for_response(response, "verifying a completed upload")
+    try:
+        result = response.json()
+    except ValueError as exc:
+        raise GoogleDriveStorageError("Google Drive returned invalid file metadata.") from exc
+    properties = result.get("appProperties") or {}
+    try:
+        actual_size = int(result.get("size", -1))
+    except (TypeError, ValueError):
+        actual_size = -1
+    if (
+        result.get("id") != file_id.strip()
+        or result.get("trashed") is True
+        or actual_size != int(expected_size)
+        or properties.get("quickshareShareId") != share_id
+        or properties.get("quickshareUploadNonce") != upload_nonce
+        or _ensure_folder() not in (result.get("parents") or [])
+    ):
+        raise GoogleDriveStorageError(
+            "The completed Drive upload did not match its QuickShare upload session."
+        )
+    return result
+
+
+def open_private_file_stream(file_id: str, range_header: str = ""):
+    """Open an authenticated, streaming download from Drive; the caller must close it."""
+    if not file_id or not isinstance(file_id, str):
+        raise GoogleDriveStorageError("This share has no Google Drive file ID.")
+    headers = _headers()
+    if range_header:
+        headers["Range"] = range_header
+    try:
+        response = requests.get(
+            f"{DRIVE_API}/files/{quote(file_id, safe='')}",
+            headers=headers,
+            params={"alt": "media"},
+            timeout=(20, 120),
+            stream=True,
+        )
+    except requests.RequestException as exc:
+        raise GoogleDriveStorageError("Could not connect to Google Drive to stream the file.") from exc
+    if response.status_code not in (200, 206):
+        _raise_for_response(response, "opening a streamed download")
+    return response
+
+
 def download_private_file(file_id: str) -> bytes:
     if not file_id or not isinstance(file_id, str):
         raise GoogleDriveStorageError("This share has no Google Drive file ID.")
