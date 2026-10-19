@@ -21,7 +21,9 @@
     const value = Number(bytes) || 0;
     if (value < 1024) return value + " B";
     if (value < 1024 * 1024) return (value / 1024).toFixed(1) + " KB";
-    return (value / (1024 * 1024)).toFixed(2) + " MB";
+    if (value < 1024 ** 3) return (value / (1024 * 1024)).toFixed(2) + " MB";
+    if (value < 1024 ** 4) return (value / (1024 ** 3)).toFixed(2) + " GB";
+    return (value / (1024 ** 4)).toFixed(2) + " TB";
   }
 
   function formatDate(value) {
@@ -81,7 +83,8 @@
     button.addEventListener("click", () => button.closest(".flash")?.remove());
   });
 
-  // Upload form interactions: drag/drop, file size validation, and feedback.
+  // Upload interactions. Drive uploads are initiated by Vercel, then file bytes
+  // travel directly from the browser to Google's resumable-upload endpoint.
   const fileInput = document.getElementById("file");
   const dropzone = document.getElementById("dropzone");
   const selectedWrap = document.getElementById("selected-file");
@@ -92,13 +95,60 @@
   const submitButton = document.getElementById("upload-submit");
   const filePrompt = document.getElementById("file-prompt");
   const fileDetail = document.getElementById("file-detail");
-  const maxBytes = fileInput ? Number((document.querySelector(".file-hint")?.textContent || "").match(/[0-9]+/)?.[0] || 3) * 1024 * 1024 : 0;
+  const fileHint = document.querySelector(".file-hint");
+  const storageProviderSelect = document.getElementById("storage_provider");
+  const progressWrap = document.getElementById("upload-progress");
+  const progressLabel = document.getElementById("upload-progress-label");
+  const progressPercent = document.getElementById("upload-progress-percent");
+  const progressBar = document.getElementById("upload-progress-bar");
+  const progressDetail = document.getElementById("upload-progress-detail");
+
+  const dataBytes = (name, fallback) => Number(fileInput?.dataset?.[name] || fallback);
+  function currentMaxBytes() {
+    if (!fileInput) return 0;
+    if (storageProviderSelect?.value === "google_drive" && fileInput.dataset.googleDriveReady === "true") {
+      return dataBytes(
+        fileInput.dataset.largeUploadAllowed === "true" ? "approvedLimitBytes" : "standardLimitBytes",
+        fileInput.dataset.largeUploadAllowed === "true" ? 50 * 1024 ** 3 : 5 * 1024 ** 3
+      );
+    }
+    return dataBytes("githubLimitBytes", 4 * 1024 * 1024);
+  }
+
+  function updateUploadLimitHint() {
+    if (!fileHint || !fileInput) return;
+    if (storageProviderSelect?.value === "google_drive" && fileInput.dataset.googleDriveReady === "true") {
+      const approved = fileInput.dataset.largeUploadAllowed === "true";
+      fileHint.textContent = "Up to " + (approved ? "50 GB" : "5 GB") +
+        (approved ? " per file" : " per file · 50 GB requires approval") +
+        " · uploads resume automatically";
+    } else {
+      fileHint.textContent = "Maximum 4 MB via GitHub storage · PDF, images, documents and archives";
+    }
+  }
+
+  function updateUploadProgress(done, total, label, detail) {
+    const percent = total > 0 ? Math.min(100, Math.floor(done / total * 100)) : 0;
+    if (progressWrap) progressWrap.hidden = false;
+    if (progressLabel) progressLabel.textContent = label;
+    if (progressPercent) progressPercent.textContent = percent + "%";
+    if (progressBar) progressBar.style.width = percent + "%";
+    if (progressDetail) progressDetail.textContent = detail || (formatSize(done) + " of " + formatSize(total));
+  }
+
+  function resetUploadProgress() {
+    if (progressWrap) progressWrap.hidden = true;
+    if (progressBar) progressBar.style.width = "0%";
+    if (progressPercent) progressPercent.textContent = "0%";
+  }
 
   function displaySelectedFile(file) {
     if (!file || !fileInput) return;
+    const maxBytes = currentMaxBytes();
     if (file.size > maxBytes) {
       fileInput.value = "";
-      showToast("This file is too large. Choose a file within the displayed limit.");
+      if (selectedWrap) selectedWrap.hidden = true;
+      showToast("This file exceeds the current storage option's limit.");
       return;
     }
     if (filePrompt) filePrompt.textContent = "File ready to share";
@@ -106,6 +156,161 @@
     if (selectedName) selectedName.textContent = file.name;
     if (selectedSize) selectedSize.textContent = formatSize(file.size);
     if (selectedWrap) selectedWrap.hidden = false;
+  }
+
+  function setUploadBusy(busy, label) {
+    if (!submitButton) return;
+    submitButton.disabled = busy;
+    const labelNode = submitButton.querySelector("span");
+    const arrow = submitButton.querySelector(".btn-arrow");
+    if (labelNode) labelNode.textContent = label || (busy ? "Uploading…" : "Upload and create share link");
+    if (arrow) arrow.textContent = busy ? "…" : "↗";
+    if (removeFile) removeFile.disabled = busy;
+    if (fileInput) fileInput.disabled = busy;
+    if (storageProviderSelect) storageProviderSelect.disabled = busy;
+  }
+
+  async function responseJson(response) {
+    const value = await response.json().catch(() => ({}));
+    if (!response.ok) throw new Error(value.error || ("Request failed (HTTP " + response.status + ")."));
+    return value;
+  }
+
+  function offsetFromRange(response) {
+    const value = response.headers.get("Range") || response.headers.get("range") || "";
+    const match = value.match(/bytes[= ]\\d+-(\\d+)/i);
+    return match ? Number(match[1]) + 1 : null;
+  }
+
+  async function getDriveUploadStatus(sessionUrl, totalSize) {
+    const response = await fetch(sessionUrl, {
+      method: "PUT",
+      mode: "cors",
+      headers: { "Content-Range": "bytes */" + totalSize },
+      body: new Blob([])
+    });
+    if (response.status === 200 || response.status === 201) {
+      return { complete: true, file: await response.json() };
+    }
+    if (response.status === 308) {
+      return { complete: false, offset: offsetFromRange(response) ?? 0 };
+    }
+    throw new Error("Could not resume the Drive upload (HTTP " + response.status + ").");
+  }
+
+  const pause = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
+
+  async function uploadLargeDriveFile(file) {
+    const metadata = {
+      filename: file.name,
+      file_size: file.size,
+      mime_type: file.type || "application/octet-stream",
+      expiry: document.getElementById("expiry")?.value || "24h",
+      max_downloads: Number(document.getElementById("max_downloads")?.value || 3),
+      storage_provider: "google_drive"
+    };
+    updateUploadProgress(0, file.size, "Preparing secure upload…", "Opening a resumable session with Google Drive.");
+    const initResponse = await fetch("/api/uploads/initiate", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      body: JSON.stringify(metadata)
+    });
+    const init = await responseJson(initResponse);
+    const sessionUrl = init.upload_session_url;
+    const uploadTicket = init.upload_ticket;
+    const chunkSize = Math.max(256 * 1024, Number(init.chunk_size) || 32 * 1024 * 1024);
+    if (!sessionUrl || !uploadTicket) throw new Error("The server did not return a resumable upload session.");
+
+    let offset = 0;
+    let completedFile = null;
+    let attemptsWithoutProgress = 0;
+    while (offset < file.size && !completedFile) {
+      const chunkEnd = Math.min(offset + chunkSize, file.size);
+      const chunk = file.slice(offset, chunkEnd);
+      let advanced = false;
+      let lastError = null;
+
+      for (let attempt = 0; attempt < 5 && !advanced; attempt++) {
+        try {
+          const response = await fetch(sessionUrl, {
+            method: "PUT",
+            mode: "cors",
+            headers: { "Content-Range": "bytes " + offset + "-" + (chunkEnd - 1) + "/" + file.size },
+            body: chunk
+          });
+          if (response.status === 200 || response.status === 201) {
+            completedFile = await response.json();
+            offset = file.size;
+            advanced = true;
+            updateUploadProgress(file.size, file.size, "Finishing upload…", "File bytes reached Google Drive. Verifying the completed file.");
+            break;
+          }
+          if (response.status === 308) {
+            const acknowledged = offsetFromRange(response);
+            const nextOffset = acknowledged === null ? chunkEnd : Math.min(chunkEnd, acknowledged);
+            if (nextOffset > offset) {
+              offset = nextOffset;
+              advanced = true;
+              attemptsWithoutProgress = 0;
+              updateUploadProgress(offset, file.size, "Uploading to Google Drive…", formatSize(offset) + " of " + formatSize(file.size) + " sent");
+              break;
+            }
+            throw new Error("Google Drive has not acknowledged this chunk yet.");
+          }
+          const text = await response.text().catch(() => "");
+          const error = new Error("Google Drive upload failed (HTTP " + response.status + ").");
+          if (response.status < 500 && response.status !== 408 && response.status !== 429) throw error;
+          lastError = error;
+        } catch (error) {
+          lastError = error;
+        }
+
+        if (!advanced && attempt < 4) {
+          try {
+            const status = await getDriveUploadStatus(sessionUrl, file.size);
+            if (status.complete) {
+              completedFile = status.file;
+              offset = file.size;
+              advanced = true;
+              break;
+            }
+            if (status.offset > offset) {
+              offset = Math.min(chunkEnd, status.offset);
+              advanced = true;
+              updateUploadProgress(offset, file.size, "Resuming upload…", formatSize(offset) + " of " + formatSize(file.size) + " confirmed");
+              break;
+            }
+          } catch (statusError) {
+            lastError = statusError;
+          }
+          await pause(Math.min(8000, 600 * (2 ** attempt)));
+        }
+      }
+
+      if (!advanced && !completedFile) {
+        attemptsWithoutProgress += 1;
+        throw lastError || new Error("The upload could not resume. Keep this page open and try again.");
+      }
+      if (attemptsWithoutProgress > 2) throw new Error("The upload stopped making progress. Start again when your connection is stable.");
+    }
+
+    if (!completedFile?.id) {
+      // Query the resumable session in case the last successful response was lost.
+      const status = await getDriveUploadStatus(sessionUrl, file.size);
+      if (!status.complete || !status.file?.id) throw new Error("Google Drive has not confirmed the completed file.");
+      completedFile = status.file;
+    }
+    updateUploadProgress(file.size, file.size, "Registering your share link…", "Checking the stored file and saving the share metadata.");
+    const finalizeResponse = await fetch("/api/uploads/finalize", {
+      method: "POST",
+      credentials: "same-origin",
+      headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+      body: JSON.stringify({ upload_ticket: uploadTicket, drive_file_id: completedFile.id })
+    });
+    const finalized = await responseJson(finalizeResponse);
+    updateUploadProgress(file.size, file.size, "Share created", "Opening your new share page…");
+    window.location.assign(finalized.share_url);
   }
 
   if (fileInput && dropzone) {
@@ -142,28 +347,46 @@
     removeFile.addEventListener("click", () => {
       fileInput.value = "";
       if (selectedWrap) selectedWrap.hidden = true;
-      if (filePrompt) filePrompt.textContent = "Drop your file here";
-      if (fileDetail) fileDetail.innerHTML = 'or <span class="browse-link">browse files</span> from your device';
+      resetUploadProgress();
+      if (filePrompt) filePrompt.textContent = "Choose a file to upload";
+      if (fileDetail) fileDetail.innerHTML = 'Drag and drop it here, or <span class="browse-link">browse files</span>';
     });
   }
 
   if (uploadForm && submitButton) {
-    uploadForm.addEventListener("submit", (event) => {
+    uploadForm.addEventListener("submit", async (event) => {
       if (!fileInput?.files?.length) {
         event.preventDefault();
         showToast("Choose a file first.");
         return;
       }
-      if (fileInput.files[0].size > maxBytes) {
+      const file = fileInput.files[0];
+      const maxBytes = currentMaxBytes();
+      if (file.size > maxBytes) {
         event.preventDefault();
-        showToast("The file exceeds the upload limit.");
+        showToast("The selected file exceeds the current upload limit.");
         return;
       }
-      submitButton.disabled = true;
-      const label = submitButton.querySelector("span");
-      const arrow = submitButton.querySelector(".btn-arrow");
-      if (label) label.textContent = "Uploading to storage…";
-      if (arrow) arrow.textContent = "…";
+
+      if (storageProviderSelect?.value === "google_drive" && fileInput.dataset.googleDriveReady === "true") {
+        event.preventDefault();
+        setUploadBusy(true, "Preparing upload…");
+        try {
+          await uploadLargeDriveFile(file);
+        } catch (error) {
+          showToast(error.message || "Upload failed. Please retry.");
+          updateUploadProgress(0, file.size, "Upload paused", error.message || "The upload did not complete. Your file is still on your device.");
+          setUploadBusy(false);
+        }
+        return;
+      }
+
+      if (file.size > dataBytes("githubLimitBytes", 4 * 1024 * 1024)) {
+        event.preventDefault();
+        showToast("GitHub storage supports only small demo uploads. Select Google Drive for larger files.");
+        return;
+      }
+      setUploadBusy(true, "Uploading to storage…");
     });
   }
 
@@ -397,7 +620,6 @@
   });
 
   // Storage provider chooser explains the visibility trade-off before upload.
-  const storageProviderSelect = document.getElementById("storage_provider");
   const storageProviderHelp = document.getElementById("storage-provider-help");
   function updateStorageProviderHelp() {
     if (!storageProviderSelect || !storageProviderHelp) return;
@@ -410,8 +632,13 @@
     }
   }
   if (storageProviderSelect) {
-    storageProviderSelect.addEventListener("change", updateStorageProviderHelp);
+    storageProviderSelect.addEventListener("change", () => {
+      updateStorageProviderHelp();
+      updateUploadLimitHint();
+      if (fileInput?.files?.[0]) displaySelectedFile(fileInput.files[0]);
+    });
     updateStorageProviderHelp();
+    updateUploadLimitHint();
   }
 
   const driveTokenButton = document.getElementById("copy-drive-refresh-token");
