@@ -7,8 +7,8 @@ A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hos
 - Google OpenID Connect sign-in; each account sees and manages only its own shares.
 - Upload files up to 4 MiB (Vercel Function payloads are limited to 4.5 MB).
 - Choose a file-storage provider per upload:
-  - **GitHub**: existing provider; file contents are public.
-  - **Google Drive**: file contents are uploaded to a private folder in the administrator's connected Drive.
+  - **Google Drive**: once the administrator connects one Drive account, this becomes the default central storage for every user's uploads; file contents stay private in that account.
+  - **GitHub**: retained as an alternative; file contents are public.
 - Public QR-code share pages; recipients do not need to sign in.
 - Server-enforced expiry, download limits, revocation, recent activity, and automatic cleanup routed to the selected file provider.
 - Drive OAuth connection is restricted to the configured storage administrator.
@@ -32,6 +32,8 @@ Older GitHub shares continue to use the default `storage_provider: github` when 
 Never commit `.env` or publish OAuth client secrets, refresh tokens, or GitHub tokens. Use a fine-grained GitHub token restricted to `QuickShare-Storage`, with Contents: Read and write permission.
 
 ## Google Drive storage setup
+
+Only the storage administrator connects a Drive account; individual users do not connect their own Drive accounts. Once connected, Google Drive is selected by default for every user, while GitHub remains an optional per-upload choice.
 
 1. In the same Google Cloud project, enable the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com).
 2. In Google Auth Platform → Clients → QuickShare Cloud Web, add this exact authorized redirect URI for the live custom domain: `https://qshare.darshanup.online/auth/google-drive/callback`. Keep the normal login callback too: `https://qshare.darshanup.online/auth/google/callback`.
