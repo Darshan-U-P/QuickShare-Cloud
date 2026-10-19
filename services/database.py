@@ -1,4 +1,4 @@
-"""PostgreSQL connection pooling and versioned schema migrations."""
+"""Supabase PostgreSQL connection pooling and versioned schema migrations."""
 from __future__ import annotations
 
 import hashlib
@@ -9,11 +9,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterator
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
+from dotenv import load_dotenv
 from psycopg_pool import ConnectionPool
 
 
 BASE_DIR = Path(__file__).resolve().parent.parent
+load_dotenv(BASE_DIR / ".env")
 DEFAULT_MIGRATIONS_DIR = BASE_DIR / "migrations"
 MIGRATION_LOCK_ID = 73490162804517
 _pool: ConnectionPool | None = None
@@ -41,24 +44,35 @@ def is_configured() -> bool:
 
 
 def _database_url() -> str:
+    """Normalize a Supabase Postgres URI and require TLS by default."""
     url = os.getenv("DATABASE_URL", "").strip()
     if not url:
         raise DatabaseNotConfiguredError(
-            "PostgreSQL is not configured. Set DATABASE_URL before running database commands."
+            "Supabase PostgreSQL is not configured. Set DATABASE_URL before running database commands."
         )
     if url.startswith("postgres://"):
         url = "postgresql://" + url[len("postgres://"):]
     if not url.startswith(("postgresql://", "postgresql+psycopg://")):
         raise DatabaseNotConfiguredError("DATABASE_URL must be a PostgreSQL connection URI.")
-    return url.replace("postgresql+psycopg://", "postgresql://", 1)
+    url = url.replace("postgresql+psycopg://", "postgresql://", 1)
+    parsed = urlsplit(url)
+    query = dict(parse_qsl(parsed.query, keep_blank_values=True))
+    query.setdefault("sslmode", "require")
+    return urlunsplit((
+        parsed.scheme,
+        parsed.netloc,
+        parsed.path,
+        urlencode(query),
+        parsed.fragment,
+    ))
 
 
 def _pool_max_size() -> int:
     try:
-        value = int(os.getenv("DATABASE_POOL_MAX_SIZE", "2"))
+        value = int(os.getenv("DATABASE_POOL_MAX_SIZE", "1"))
     except (TypeError, ValueError):
-        value = 2
-    return max(1, min(5, value))
+        value = 1
+    return max(1, min(3, value))
 
 
 def get_pool() -> ConnectionPool:
@@ -76,7 +90,13 @@ def get_pool() -> ConnectionPool:
                 max_size=_pool_max_size(),
                 timeout=5,
                 reconnect_timeout=10,
-                kwargs={"connect_timeout": 5, "application_name": "quickshare-cloud"},
+                kwargs={
+                    "connect_timeout": 5,
+                    "application_name": "quickshare-cloud",
+                    # Supabase transaction pooling does not support named
+                    # prepared statements; disable psycopg automatic prepare.
+                    "prepare_threshold": None,
+                },
                 open=False,
             )
             pool.open(wait=True, timeout=5)

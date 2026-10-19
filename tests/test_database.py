@@ -14,7 +14,7 @@ def test_database_is_optional_until_migration_is_selected(monkeypatch):
 
 def test_database_url_normalizes_legacy_postgres_scheme(monkeypatch):
     monkeypatch.setenv("DATABASE_URL", "postgres://user:pass@example.invalid/db")
-    assert database._database_url() == "postgresql://user:pass@example.invalid/db"
+    assert database._database_url() == "postgresql://user:pass@example.invalid/db?sslmode=require"
 
 
 def test_database_rejects_non_postgres_url(monkeypatch):
@@ -55,3 +55,28 @@ def test_sql_splitter_ignores_comment_only_fragments():
     assert len(statements) == 2
     assert statements[0].startswith("CREATE TABLE")
     assert statements[1].startswith("CREATE INDEX")
+
+
+def test_database_url_adds_ssl_without_overwriting_explicit_ssl_mode(monkeypatch):
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://postgres.project-ref:pass@aws-example.pooler.supabase.com:6543/postgres?sslmode=verify-full",
+    )
+    value = database._database_url()
+    assert value.endswith("?sslmode=verify-full")
+    assert "pooler.supabase.com:6543" in value
+
+
+def test_database_url_adds_ssl_to_supabase_transaction_pooler(monkeypatch):
+    monkeypatch.setenv(
+        "DATABASE_URL",
+        "postgresql://postgres.project-ref:pass@aws-example.pooler.supabase.com:6543/postgres",
+    )
+    value = database._database_url()
+    assert value.endswith("?sslmode=require")
+    assert "pooler.supabase.com:6543" in value
+
+
+def test_database_pool_defaults_to_one_connection_per_serverless_instance(monkeypatch):
+    monkeypatch.delenv("DATABASE_POOL_MAX_SIZE", raising=False)
+    assert database._pool_max_size() == 1

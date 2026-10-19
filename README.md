@@ -296,9 +296,9 @@ The following public and transfer API routes describe the current app shape. The
 
 
  
-## PostgreSQL data foundation and expiry-driven deletion
+## Supabase database foundation and expiry-driven deletion
 
-The initial PostgreSQL schema and an idempotent legacy-data importer are included as a pre-cutover foundation. Production continues to read and write GitHub JSON metadata until a later phase switches every share operation to PostgreSQL. Adding a database URL alone does not switch the live app.
+The initial Supabase Postgres schema and an idempotent legacy-data importer are included as a pre-cutover foundation. Production continues to read and write GitHub JSON metadata until a later phase switches every share operation to PostgreSQL. Adding a database URL alone does not switch the live app.
 
 ### Schema entities
 
@@ -329,11 +329,13 @@ The deletion system is designed around the physical file, not just the public sh
 
 The current GitHub-backed production cleanup remains enabled during this first phase. Its Vercel Cron invocation is daily and processes a bounded number of records. On Vercel Hobby, Cron is limited to once per day, so physical deletion can be delayed until the next scheduled run even though the expired link is already unusable. The PostgreSQL cleanup worker must not be activated against a stale imported snapshot; it becomes the production cleanup path only after the full PostgreSQL application cutover.
 
-### Configure PostgreSQL
+### Configure Supabase Postgres
 
-1. Create a managed PostgreSQL database from a provider that supports standard PostgreSQL connection URLs and TLS.
-2. Add DATABASE_URL to local .env and Vercel Production. Use the provider's pooled connection string when offered. Never commit a live database URL.
-3. Keep the serverless pool small initially by using DATABASE_POOL_MAX_SIZE=2.
+1. Create a project in [Supabase](https://supabase.com/dashboard) and wait for the database to finish provisioning.
+2. In the Supabase dashboard, open **Connect** and copy the **Transaction pooler** connection string for the Vercel runtime. It normally uses port 6543 and a username that includes the project reference. Copy the complete URI shown by Supabase; do not guess the host or username.
+3. Add that URI as DATABASE_URL in Vercel Production. For one-off schema migration/import commands run from your computer, use the Supabase Direct connection if your network supports it; otherwise use the Session Pooler URI. Your local .env and Vercel can use different DATABASE_URL values that point to the same Supabase project.
+4. Never commit a live database URL; it contains the database password. URL-encode reserved characters in the password.
+5. Keep the Vercel runtime pool small by using DATABASE_POOL_MAX_SIZE=1. The connection helper requires TLS and disables psycopg auto-prepare for Supabase's Transaction Pooler.
 4. Apply the schema migration from the repository root:
 
         python -m scripts.db_migrate
@@ -354,8 +356,8 @@ The importer preserves existing public share IDs and maps legacy owner hashes in
 
 ### New environment variables
 
-- DATABASE_URL: PostgreSQL connection URI, unset by default.
-- DATABASE_POOL_MAX_SIZE: process-local connection pool ceiling; default 2, capped at 5.
+- DATABASE_URL: Supabase PostgreSQL connection URI, unset by default. Use the Transaction Pooler URI for Vercel runtime requests.
+- DATABASE_POOL_MAX_SIZE: process-local connection pool ceiling; default 1, capped at 3.
 
 ## Tests
 
