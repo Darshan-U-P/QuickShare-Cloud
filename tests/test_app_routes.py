@@ -378,51 +378,112 @@ def test_finalize_resumable_upload_verifies_owner_and_saves_metadata(monkeypatch
 
 
 
-def test_transfer_validation_rejects_revoked_or_expired_share(monkeypatch):
-    share_id = "d" * 32
-    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "test-transfer-secret-long-enough")
-    metadata = make_metadata(share_id, revoked=True)
+
+
+def _large_drive_metadata(share_id="9" * 32, size=5 * 1024 * 1024):
+    metadata = make_metadata(share_id)
     metadata.update({
+        "original_filename": "large-demo.bin",
         "storage_provider": "google_drive",
-        "drive_file_id": "drive-transfer-id",
-        "file_size": 2048,
+        "drive_file_id": "private-drive-file-id",
+        "file_size": size,
     })
+    return metadata
+
+
+def test_large_drive_download_opens_browser_chunk_page(monkeypatch):
+    share_id = "9" * 32
+    metadata = _large_drive_metadata(share_id)
     monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
-    serializer = app_module._transfer_ticket_serializer()
-    ticket = serializer.dumps({
-        "jti": "e" * 32,
-        "share_id": share_id,
-        "file_id": "drive-transfer-id",
-        "filename": "demo.bin",
-        "size": 2048,
-        "exp_at": int(datetime.now(timezone.utc).timestamp()) + 600,
-    })
     client = app_module.app.test_client()
-    response = client.post("/api/transfer/validate", json={"ticket": ticket})
-    assert response.status_code == 410
-    assert response.json["error"]
-
-
-def test_transfer_validation_allows_live_ticket_even_if_reserved_last_download(monkeypatch):
-    share_id = "f" * 32
-    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "test-transfer-secret-long-enough")
-    # The Vercel route reserves a download before redirecting to the transfer host.
-    metadata = make_metadata(share_id, downloads=3, max_downloads=3)
-    metadata.update({
-        "storage_provider": "google_drive",
-        "drive_file_id": "drive-transfer-id",
-        "file_size": 2048,
-    })
-    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
-    serializer = app_module._transfer_ticket_serializer()
-    ticket = serializer.dumps({
-        "jti": "1" * 32,
-        "share_id": share_id,
-        "file_id": "drive-transfer-id",
-        "filename": "demo.bin",
-        "size": 2048,
-        "exp_at": int(datetime.now(timezone.utc).timestamp()) + 600,
-    })
-    response = app_module.app.test_client().post("/api/transfer/validate", json={"ticket": ticket})
+    response = client.get(f"/download/{share_id}")
     assert response.status_code == 200
-    assert response.json == {"allowed": True}
+    assert b"Save file to your device" in response.data
+    assert b"PRIVATE LARGE-FILE DOWNLOAD" in response.data
+    assert b"Hostinger" not in response.data
+
+
+def test_large_download_initiation_reserves_one_download_ticket(monkeypatch):
+    share_id = "8" * 32
+    metadata = _large_drive_metadata(share_id)
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
+    records = []
+    monkeypatch.setattr(app_module, "record_download", lambda sid: records.append(sid) or "success")
+    client = app_module.app.test_client()
+    response = client.post(f"/api/download/initiate/{share_id}", json={})
+    assert response.status_code == 200
+    assert records == [share_id]
+    payload = app_module._decode_download_ticket(response.json["ticket"])
+    assert payload["share_id"] == share_id
+    assert payload["file_id"] == "private-drive-file-id"
+    assert payload["size"] == 5 * 1024 * 1024
+    assert response.json["chunk_size"] == 4 * 1024 * 1024
+
+
+def test_download_chunk_streams_exact_requested_range(monkeypatch):
+    share_id = "7" * 32
+    metadata = _large_drive_metadata(share_id)
+    ticket, _expires = app_module._make_download_ticket(metadata)
+
+    class FakeStream:
+        status_code = 206
+        headers = {"Content-Range": f"bytes 0-3/{metadata['file_size']}"}
+
+        def __init__(self):
+            self.closed = False
+
+        def iter_content(self, chunk_size=1024 * 1024):
+            yield b"ab"
+            yield b"cd"
+
+        def close(self):
+            self.closed = True
+
+    upstream = FakeStream()
+    calls = []
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "open_private_file_stream",
+        lambda file_id, range_header="": calls.append((file_id, range_header)) or upstream,
+    )
+    response = app_module.app.test_client().post(
+        "/api/download/chunk",
+        json={"ticket": ticket, "start": 0, "end": 3},
+    )
+    assert response.status_code == 206
+    assert response.data == b"abcd"
+    assert response.headers["Content-Range"] == f"bytes 0-3/{metadata['file_size']}"
+    assert calls == [("private-drive-file-id", "bytes=0-3")]
+    assert upstream.closed
+
+
+def test_download_chunk_rejects_range_larger_than_vercel_response_limit(monkeypatch):
+    metadata = _large_drive_metadata()
+    ticket, _expires = app_module._make_download_ticket(metadata)
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "open_private_file_stream",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(AssertionError("Oversized range must be rejected before Drive access")),
+    )
+    response = app_module.app.test_client().post(
+        "/api/download/chunk",
+        json={
+            "ticket": ticket,
+            "start": 0,
+            "end": app_module.DOWNLOAD_CHUNK_BYTES,
+        },
+    )
+    assert response.status_code == 416
+
+
+def test_refresh_download_ticket_rejects_revoked_share(monkeypatch):
+    share_id = "6" * 32
+    metadata = _large_drive_metadata(share_id)
+    ticket, _expires = app_module._make_download_ticket(metadata)
+    metadata["revoked"] = True
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
+    response = app_module.app.test_client().post(
+        "/api/download/refresh",
+        json={"ticket": ticket},
+    )
+    assert response.status_code == 410
