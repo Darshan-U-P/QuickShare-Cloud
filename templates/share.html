@@ -54,6 +54,11 @@
           <div class="copy-row"><input id="share-url" type="text" value="{{ share_url }}" readonly aria-label="Share URL"><button class="btn btn-copy" type="button" data-copy-target="share-url"><span aria-hidden="true">▢</span> Copy link</button></div>
           <p class="microcopy" id="copy-hint">Anyone with this link can open the share page.</p>
         </div>
+        <div class="download-url-block">
+          <label for="download-url">Direct download link</label>
+          <div class="copy-row"><input id="download-url" type="text" value="{{ url_for('download', share_id=file.share_id, _external=True) }}" readonly aria-label="Direct download URL"><button class="btn btn-copy" type="button" data-copy-target="download-url"><span aria-hidden="true">↓</span> Copy download link</button></div>
+          <p class="microcopy">Opens the file download directly. Expiry and download limits still apply.</p>
+        </div>
         <div class="file-actions">
           <a class="btn btn-primary action-download" href="{{ url_for('download', share_id=file.share_id) }}"><span aria-hidden="true">↓</span> Download file <span class="btn-arrow" aria-hidden="true">↗</span></a>
           <a class="btn btn-secondary" href="{{ url_for('qr_image', share_id=file.share_id) }}" download><span aria-hidden="true">▦</span> Save QR code</a>
