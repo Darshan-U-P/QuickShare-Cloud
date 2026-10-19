@@ -275,7 +275,7 @@ def test_unconnected_drive_keeps_github_as_default(monkeypatch):
 def test_standard_account_cannot_initialize_upload_over_5_gb(monkeypatch):
     client = app_module.app.test_client()
     sign_in(client)
-    monkeypatch.delenv("LARGE_UPLOAD_ALLOWED_EMAILS", raising=False)
+    monkeypatch.setattr(app_module, "_large_upload_allowed", lambda: False)
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     monkeypatch.setattr(
         app_module.google_drive_storage,
@@ -301,9 +301,7 @@ def test_standard_account_cannot_initialize_upload_over_5_gb(monkeypatch):
 def test_approved_account_can_initialize_upload_up_to_50_gb(monkeypatch):
     client = app_module.app.test_client()
     sign_in(client)
-    monkeypatch.setenv("LARGE_UPLOAD_ALLOWED_EMAILS", "other@example.com, STUDENT@example.com")
-    monkeypatch.setenv("TRANSFER_SERVICE_URL", "https://transfer.example.com")
-    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "unit-test-transfer-secret-which-is-long")
+    monkeypatch.setattr(app_module, "_large_upload_allowed", lambda: True)
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     seen = []
     monkeypatch.setattr(
@@ -334,8 +332,6 @@ def test_approved_account_can_initialize_upload_up_to_50_gb(monkeypatch):
 def test_finalize_resumable_upload_verifies_owner_and_saves_metadata(monkeypatch):
     client = app_module.app.test_client()
     sign_in(client)
-    monkeypatch.setenv("TRANSFER_SERVICE_URL", "https://transfer.example.com")
-    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "unit-test-transfer-secret-which-is-long")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     monkeypatch.setattr(
         app_module.google_drive_storage,
