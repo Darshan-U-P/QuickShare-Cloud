@@ -79,7 +79,9 @@ MAX_STANDARD_UPLOAD_BYTES = 5 * 1024**3
 MAX_APPROVED_UPLOAD_BYTES = 50 * 1024**3
 DRIVE_UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024
 UPLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
-TRANSFER_TICKET_MAX_AGE_SECONDS = max(60, int(os.getenv("TRANSFER_TICKET_MAX_AGE_SECONDS", "172800")))
+DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
+DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
+DOWNLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 EXTENSION_PATTERN = re.compile(r"^\.[a-zA-Z0-9]{1,10}$")
 BLOCKED_EXTENSIONS = {
@@ -207,48 +209,91 @@ def _large_upload_allowed() -> bool:
 
 
 def _large_transfer_ready() -> bool:
-    return bool(
-        os.getenv("TRANSFER_SERVICE_URL", "").strip()
-        and os.getenv("TRANSFER_TOKEN_SECRET", "").strip()
-    )
+    # Large-file data moves in bounded 4 MiB ranges through this Vercel app;
+    # uploads go directly from the browser to Drive's resumable-upload session.
+    return _drive_storage_ready()
 
 
 def _upload_ticket_serializer():
     return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="quickshare-drive-upload-v1")
 
 
-def _transfer_ticket_serializer():
-    secret = os.getenv("TRANSFER_TOKEN_SECRET", "").strip()
-    if not secret:
-        return None
-    return URLSafeTimedSerializer(secret, salt="quickshare-transfer-v1")
+def _download_ticket_serializer():
+    return URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="quickshare-drive-download-v1",
+    )
 
 
-def _transfer_download_url(file_record: dict) -> str:
-    base = os.getenv("TRANSFER_SERVICE_URL", "").strip().rstrip("/")
-    serializer = _transfer_ticket_serializer()
-    if not base or not serializer:
-        raise StorageError("Large-file downloads are not configured yet. The administrator must configure the transfer service.")
+def _parse_share_expiry(metadata: dict) -> datetime:
+    expiry = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
+    if expiry.tzinfo is None:
+        expiry = expiry.replace(tzinfo=timezone.utc)
+    return expiry
+
+
+def _make_download_ticket(metadata: dict, *, jti: str | None = None) -> tuple[str, int]:
+    """Issue a short-window ticket for browser-to-Vercel range downloads."""
+    share_id = str(metadata.get("share_id", "")).strip()
+    file_id = str(metadata.get("drive_file_id", "")).strip()
     try:
-        size = int(file_record.get("file_size", 0))
-    except (TypeError, ValueError):
-        size = 0
-    if size < 1 or size > MAX_APPROVED_UPLOAD_BYTES:
-        raise StorageError("This file size is outside the supported large-transfer range.")
-    file_id = str(file_record.get("drive_file_id", "")).strip()
-    share_id = str(file_record.get("share_id", "")).strip()
-    if not file_id or not SHARE_ID_PATTERN.fullmatch(share_id):
-        raise StorageError("This share is missing a valid Google Drive file reference.")
+        size = int(metadata.get("file_size", 0))
+        share_exp_at = int(_parse_share_expiry(metadata).timestamp())
+    except (TypeError, ValueError, OverflowError) as exc:
+        raise StorageError("This share has invalid file size or expiry metadata.") from exc
+    if not SHARE_ID_PATTERN.fullmatch(share_id) or not file_id:
+        raise StorageError("This share is missing a valid private Google Drive file reference.")
+    if size <= MAX_GITHUB_UPLOAD_BYTES or size > MAX_APPROVED_UPLOAD_BYTES:
+        raise StorageError("This file is outside the supported large-download range.")
+    now = int(datetime.now(timezone.utc).timestamp())
+    if share_exp_at <= now:
+        raise StorageError("This share has expired.")
+    exp_at = min(share_exp_at, now + DOWNLOAD_TICKET_WINDOW_SECONDS)
     payload = {
-        "jti": secrets.token_hex(16),
+        "jti": jti or secrets.token_hex(16),
         "share_id": share_id,
         "file_id": file_id,
-        "filename": str(file_record.get("original_filename", "download.bin"))[:200],
+        "filename": str(metadata.get("original_filename", "download.bin"))[:200],
         "size": size,
-        "exp_at": int(datetime.now(timezone.utc).timestamp()) + TRANSFER_TICKET_MAX_AGE_SECONDS,
+        "share_exp_at": share_exp_at,
+        "exp_at": exp_at,
     }
-    token = serializer.dumps(payload)
-    return f"{base}/download/{token}"
+    return _download_ticket_serializer().dumps(payload), exp_at
+
+
+def _decode_download_ticket(token: str, *, enforce_window: bool = True) -> dict:
+    if not isinstance(token, str) or not token:
+        raise ValueError("Missing download ticket.")
+    try:
+        payload = _download_ticket_serializer().loads(
+            token,
+            max_age=DOWNLOAD_TICKET_MAX_AGE_SECONDS,
+        )
+    except SignatureExpired as exc:
+        raise ValueError("The download ticket is too old. Reopen the share page to start again.") from exc
+    except BadSignature as exc:
+        raise ValueError("The download ticket is invalid.") from exc
+    if not isinstance(payload, dict):
+        raise ValueError("The download ticket is invalid.")
+    try:
+        size = int(payload.get("size", 0))
+        exp_at = int(payload.get("exp_at", 0))
+        share_exp_at = int(payload.get("share_exp_at", 0))
+    except (TypeError, ValueError) as exc:
+        raise ValueError("The download ticket is invalid.") from exc
+    if (
+        not SHARE_ID_PATTERN.fullmatch(str(payload.get("share_id", "")))
+        or not isinstance(payload.get("file_id"), str)
+        or not payload.get("file_id")
+        or not isinstance(payload.get("filename"), str)
+        or size <= MAX_GITHUB_UPLOAD_BYTES
+        or size > MAX_APPROVED_UPLOAD_BYTES
+        or share_exp_at <= int(datetime.now(timezone.utc).timestamp())
+    ):
+        raise ValueError("The download ticket is invalid or the share has expired.")
+    if enforce_window and exp_at <= int(datetime.now(timezone.utc).timestamp()):
+        raise ValueError("The download ticket needs refreshing.")
+    return payload
 
 
 def _drive_storage_ready() -> bool:
@@ -758,6 +803,123 @@ def qr_image(share_id: str):
     return send_file(output, mimetype="image/png", download_name=f"quickshare-{share_id}.png")
 
 
+@app.post("/api/download/initiate/<share_id>")
+def api_download_initiate(share_id: str):
+    if not SHARE_ID_PATTERN.fullmatch(share_id):
+        abort(404)
+    file_record = get_share_metadata(share_id)
+    if not file_record:
+        return jsonify({"error": "Share not found."}), 404
+    status = share_status(file_record)
+    if status != "active":
+        record_rejected_attempt(share_id, status)
+        return jsonify({"error": "This share is " + status + "."}), 410
+    if file_record.get("storage_provider", "github") != "google_drive":
+        return jsonify({"error": "Large downloads are supported for private Google Drive files only."}), 400
+    try:
+        ticket, expires_at = _make_download_ticket(file_record)
+        result = record_download(share_id)
+    except StorageError as exc:
+        return jsonify({"error": str(exc)}), 400
+    if result != "success":
+        return jsonify({"error": "Could not reserve this download. Please retry."}), 409
+    return jsonify({
+        "ticket": ticket,
+        "ticket_expires_at": expires_at,
+        "file_size": int(file_record["file_size"]),
+        "chunk_size": DOWNLOAD_CHUNK_BYTES,
+    })
+
+
+@app.post("/api/download/refresh")
+def api_download_refresh():
+    data = request.get_json(silent=True) or {}
+    token = data.get("ticket", "")
+    try:
+        payload = _decode_download_ticket(token, enforce_window=False)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 410
+
+    share_id = payload["share_id"]
+    metadata = get_share_metadata(share_id)
+    if not metadata:
+        return jsonify({"error": "This share no longer exists."}), 404
+    try:
+        expiry = _parse_share_expiry(metadata)
+        same_file = (
+            metadata.get("storage_provider") == "google_drive"
+            and hmac.compare_digest(str(metadata.get("drive_file_id", "")), str(payload["file_id"]))
+            and int(metadata.get("file_size", 0)) == int(payload["size"])
+        )
+    except (TypeError, ValueError):
+        same_file = False
+        expiry = datetime.fromtimestamp(0, tz=timezone.utc)
+    if not same_file:
+        return jsonify({"error": "This download ticket no longer matches the share."}), 403
+    if metadata.get("revoked") or expiry <= datetime.now(timezone.utc):
+        return jsonify({"error": "This share has expired or was revoked."}), 410
+    try:
+        refreshed, expires_at = _make_download_ticket(metadata, jti=str(payload.get("jti") or ""))
+    except StorageError as exc:
+        return jsonify({"error": str(exc)}), 410
+    return jsonify({"ticket": refreshed, "ticket_expires_at": expires_at})
+
+
+@app.post("/api/download/chunk")
+def api_download_chunk():
+    data = request.get_json(silent=True) or {}
+    try:
+        payload = _decode_download_ticket(data.get("ticket", ""))
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 410
+    start, end = data.get("start"), data.get("end")
+    if type(start) is not int or type(end) is not int:
+        return jsonify({"error": "Chunk start and end must be integers."}), 400
+    size = int(payload["size"])
+    length = end - start + 1
+    if start < 0 or end < start or end >= size or length > DOWNLOAD_CHUNK_BYTES:
+        return jsonify({"error": "The requested byte range is invalid."}), 416
+
+    try:
+        upstream = google_drive_storage.open_private_file_stream(
+            payload["file_id"],
+            f"bytes={start}-{end}",
+        )
+    except StorageError:
+        app.logger.exception("Could not stream Drive chunk for share %s", payload["share_id"])
+        return jsonify({"error": "Google Drive could not retrieve this file segment. Retry shortly."}), 502
+
+    try:
+        upstream_range = upstream.headers.get("Content-Range", "")
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", upstream_range)
+        if upstream.status_code != 206 or not match:
+            return jsonify({"error": "Google Drive did not return a valid partial-file response."}), 502
+        actual_start, actual_end, actual_size = map(int, match.groups())
+        if actual_start != start or actual_end != end or actual_size != size:
+            return jsonify({"error": "Google Drive returned an unexpected file segment."}), 502
+        chunks = bytearray()
+        for piece in upstream.iter_content(chunk_size=1024 * 1024):
+            if piece:
+                chunks.extend(piece)
+                if len(chunks) > length:
+                    return jsonify({"error": "Google Drive returned more bytes than requested."}), 502
+        if len(chunks) != length:
+            return jsonify({"error": "Google Drive returned an incomplete file segment. Retry the chunk."}), 502
+    except Exception:
+        app.logger.exception("Error reading Drive chunk for share %s", payload["share_id"])
+        return jsonify({"error": "Could not read this file segment. Retry shortly."}), 502
+    finally:
+        upstream.close()
+
+    response = app.response_class(bytes(chunks), status=206, mimetype="application/octet-stream")
+    response.headers["Content-Length"] = str(length)
+    response.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
+    response.headers["Accept-Ranges"] = "bytes"
+    response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    return response
+
+
 @app.get("/download/<share_id>")
 def download(share_id: str):
     if not SHARE_ID_PATTERN.fullmatch(share_id):
@@ -778,15 +940,7 @@ def download(share_id: str):
         file_size = 0
 
     if is_drive_file and file_size > MAX_GITHUB_UPLOAD_BYTES:
-        try:
-            transfer_url = _transfer_download_url(file_record)
-            result = record_download(share_id)
-        except StorageError as exc:
-            app.logger.warning("Large download setup failed for share %s: %s", share_id, exc)
-            return redirect(url_for("share_page", share_id=share_id, error="transfer"))
-        if result != "success":
-            return redirect(url_for("share_page", share_id=share_id, error=result))
-        return redirect(transfer_url, code=302)
+        return render_template("large_download.html", file=file_record, chunk_size=DOWNLOAD_CHUNK_BYTES)
 
     try:
         content = download_share_file(file_record)
