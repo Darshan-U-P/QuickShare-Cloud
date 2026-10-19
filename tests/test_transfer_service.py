@@ -1,5 +1,3 @@
-import time
-
 import pytest
 from itsdangerous import URLSafeTimedSerializer
 
@@ -32,9 +30,9 @@ def transfer_test_setup(monkeypatch, tmp_path):
     return transfer_service.app.test_client()
 
 
-def ticket(serializer):
+def ticket(serializer, ticket_id="a" * 32):
     return serializer.dumps({
-        "jti": "a" * 32,
+        "jti": ticket_id,
         "share_id": "b" * 32,
         "file_id": "private-drive-id",
         "filename": "demo.bin",
@@ -67,10 +65,11 @@ def test_large_download_streams_and_ticket_cannot_be_replayed(transfer_test_setu
     assert "attachment" in response.headers["Content-Disposition"]
     assert upstream.closed is True
 
-    replay = client.get("/download/" + ticket(serializer))
-    # A new token is a new download ticket; a completed token itself is one-use.
+    # A fresh ticket is allowed; replaying the completed ticket is not.
+    new_download = client.get("/download/" + ticket(serializer, "c" * 32))
     replay_same = client.get(response.request.path)
-    assert replay.status_code == 200
+    assert new_download.status_code == 200
+    assert new_download.data == b"test-file"
     assert replay_same.status_code == 410
 
 
