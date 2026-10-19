@@ -225,6 +225,8 @@ def _get_large_upload_allowlist(*, force_refresh: bool = False) -> set[str]:
             return set(emails)
         except StorageError:
             app.logger.warning("Could not read the private 50 GB permission list; failing closed.", exc_info=True)
+            if force_refresh:
+                raise
             _LARGE_UPLOAD_ALLOWLIST_CACHE["emails"] = frozenset()
             _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"] = now + 3
             return set()
