@@ -257,7 +257,7 @@ def test_private_large_upload_allowlist_creates_config_in_drive_folder(monkeypat
     assert "private-folder-id" in seen["data"].decode("utf-8")
     assert "quickshareConfigKey" in seen["data"].decode("utf-8")
     assert "user@example.com" in seen["data"].decode("utf-8")
-    assert json.loads(seen["data"].decode("utf-8").split("Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n")[-1].split("\\r\\n--")[0])["approved_emails"] == ["other@example.com", "user@example.com"]
+    assert json.loads(seen["data"].decode("utf-8").split("Content-Type: application/json; charset=UTF-8\r\n\r\n")[-1].split("\r\n--")[0])["approved_emails"] == ["other@example.com", "user@example.com"]
 
 
 def test_private_large_upload_allowlist_updates_existing_config(monkeypatch):
