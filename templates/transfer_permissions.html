@@ -76,7 +76,7 @@
             <strong>{{ email }}</strong>
             <span>Up to 50 GB per file</span>
           </div>
-          <form action="{{ url_for('admin_remove_transfer_permission') }}" method="post" onsubmit="return confirm('Revoke 50 GB transfer permission for {{ email }}?');">
+          <form action="{{ url_for('admin_remove_transfer_permission') }}" method="post" onsubmit="return confirm('Revoke 50 GB transfer permission for this account?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <input type="hidden" name="email" value="{{ email }}">
             <button class="btn btn-danger-soft" type="submit" {% if not drive_storage_ready or permission_error %}disabled{% endif %}>Revoke</button>
