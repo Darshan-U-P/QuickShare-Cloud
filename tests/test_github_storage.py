@@ -207,3 +207,43 @@ def test_list_user_shares_only_returns_matching_account(monkeypatch):
     assert len(shares) == 1
     assert shares[0]["original_filename"] == "mine.pdf"
     assert "owner_id_hash" not in shares[0]
+
+
+
+def test_cleanup_dispatches_private_drive_files_to_drive_deletion(monkeypatch):
+    share_id = "e" * 32
+    current = {
+        "share_id": share_id,
+        "storage_provider": "google_drive",
+        "drive_file_id": "drive-private-id",
+        "storage_path": f"files/{share_id}.txt",
+        "revoked": False,
+        "expiry_time": (datetime.now(timezone.utc) - timedelta(minutes=1)).isoformat(),
+        "download_count": 0,
+        "max_downloads": 3,
+        "downloads": [],
+        "cleanup_status": "pending",
+    }
+    monkeypatch.setattr(storage, "_list_metadata_names", lambda: [share_id])
+    monkeypatch.setattr(storage, "_get_cleanup_cursor", lambda: "")
+    monkeypatch.setattr(storage, "_set_cleanup_cursor", lambda _sid: None)
+    monkeypatch.setattr(storage, "get_share_metadata", lambda _sid: copy.deepcopy(current))
+    monkeypatch.setattr(
+        storage,
+        "delete_storage_file",
+        lambda _path: (_ for _ in ()).throw(AssertionError("GitHub file deletion must not be used for Drive shares")),
+    )
+    drive_deleted = []
+    from services import google_drive_storage
+    monkeypatch.setattr(google_drive_storage, "delete_private_file", lambda file_id: drive_deleted.append(file_id) or "deleted")
+
+    def fake_write(_sid, mutate, _message, attempts=3):
+        outcome = mutate(current)
+        return ("success", current) if outcome == "write" else (outcome, current)
+
+    monkeypatch.setattr(storage, "_write_metadata", fake_write)
+    summary = storage.cleanup_expired_files(max_items=20)
+
+    assert drive_deleted == ["drive-private-id"]
+    assert summary["deleted"] == 1
+    assert current["cleanup_status"] == "deleted"
