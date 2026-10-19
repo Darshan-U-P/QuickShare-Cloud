@@ -336,19 +336,19 @@ The current GitHub-backed production cleanup remains enabled during this first p
 3. Add that URI as DATABASE_URL in Vercel Production. For one-off schema migration/import commands run from your computer, use the Supabase Direct connection if your network supports it; otherwise use the Session Pooler URI. Your local .env and Vercel can use different DATABASE_URL values that point to the same Supabase project.
 4. Never commit a live database URL; it contains the database password. URL-encode reserved characters in the password.
 5. Keep the Vercel runtime pool small by using DATABASE_POOL_MAX_SIZE=1. The connection helper requires TLS and disables psycopg auto-prepare for Supabase's Transaction Pooler.
-4. Apply the schema migration from the repository root:
+6. Apply the schema migration from the repository root:
 
         python -m scripts.db_migrate
 
-5. Preview the legacy metadata migration without modifying PostgreSQL:
+7. Preview the legacy metadata migration without modifying Supabase:
 
         python -m scripts.migrate_github_metadata
 
-6. After reviewing the counts and errors, import idempotently:
+8. After reviewing the counts and errors, import idempotently:
 
         python -m scripts.migrate_github_metadata --apply
 
-7. Inspect row counts, expiry candidates, public share IDs and storage references before any production cutover.
+9. Inspect row counts, expiry candidates, public share IDs and storage references before any production cutover.
 
 The importer preserves existing public share IDs and maps legacy owner hashes into private user rows. It also synchronizes the approved 50 GB email list from the connected private Google Drive configuration into PostgreSQL, including revoking database rows for accounts no longer approved in Drive. Legacy records do not contain the original Google subject or account email, so those fields remain empty until the account signs in after a later cutover. The importer is resumable/idempotent and does not delete stored files. A failed Drive permission import is reported as an error; reconnect Drive and rerun the importer to retry safely.
 
