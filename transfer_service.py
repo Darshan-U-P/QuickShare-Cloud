@@ -14,6 +14,7 @@ from pathlib import Path
 from urllib.parse import quote
 
 from dotenv import load_dotenv
+import requests
 from flask import Flask, Response, abort, make_response, request
 from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
@@ -25,6 +26,7 @@ load_dotenv(BASE_DIR / ".env")
 
 TOKEN_SECRET = os.getenv("TRANSFER_TOKEN_SECRET", "").strip()
 TOKEN_MAX_AGE = max(60, int(os.getenv("TRANSFER_TICKET_MAX_AGE_SECONDS", "172800")))
+TRANSFER_WEB_BASE_URL = os.getenv("TRANSFER_WEB_BASE_URL", "https://qshare.darshanup.online").strip().rstrip("/")
 DB_PATH = Path(os.getenv("TRANSFER_DB_PATH", str(BASE_DIR / "transfer_sessions.sqlite3"))).resolve()
 MAX_FILE_BYTES = 50 * 1024**3
 COOKIE_PREFIX = "qsdl_"
@@ -79,6 +81,27 @@ def _parse_range(value: str, size: int):
     if start >= size or end < start:
         raise ValueError("Range is outside the file.")
     return start, min(end, size - 1), True
+
+
+def _validate_with_web(token: str):
+    """Re-check expiry/revocation in the main app for each initial or ranged download request."""
+    if not TRANSFER_WEB_BASE_URL:
+        abort(503, description="The QuickShare validation endpoint is not configured.")
+    try:
+        response = requests.post(
+            f"{TRANSFER_WEB_BASE_URL}/api/transfer/validate",
+            json={"ticket": token},
+            timeout=15,
+        )
+    except requests.RequestException:
+        app.logger.exception("Could not validate large-download ticket against QuickShare.")
+        abort(503, description="QuickShare could not validate this download. Retry shortly.")
+    if response.status_code == 410:
+        abort(410, description="This share has expired or was revoked.")
+    if response.status_code in (403, 404):
+        abort(response.status_code, description="This transfer is no longer authorized.")
+    if not response.ok:
+        abort(503, description="QuickShare could not validate this download. Retry shortly.")
 
 
 def _ticket_data(token: str) -> dict:
@@ -213,6 +236,7 @@ def health():
 @app.get("/download/<token>")
 def download_from_drive(token: str):
     payload = _ticket_data(token)
+    _validate_with_web(token)
     ticket_id = payload["jti"]
     size = int(payload["size"])
     try:
