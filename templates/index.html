@@ -10,7 +10,7 @@
       <span><span class="point-check">✓</span> Share page + direct download link</span>
       <span><span class="point-check">✓</span> QR code in one click</span>
       <span><span class="point-check">✓</span> Expiry and download limits</span>
-      {% if google_drive_storage_ready %}<span><span class="point-check">✓</span> Up to {{ upload_limit_gb }} GB per file{% if not large_upload_allowed %} · 50 GB by approval{% endif %}</span>{% else %}<span><span class="point-check">✓</span> Up to 4 MB per file</span>{% endif %}
+      {% if google_drive_storage_ready and large_transfer_ready %}<span><span class="point-check">✓</span> Up to {{ upload_limit_gb }} GB per file{% if not large_upload_allowed %} · 50 GB by approval{% endif %}</span>{% else %}<span><span class="point-check">✓</span> Up to 4 MB per file until large-transfer setup is complete</span>{% endif %}
     </div>
   </div>
   <div class="hero-showcase" aria-label="Illustration of a file ready to share">
@@ -67,6 +67,7 @@
         <input id="file" name="file" type="file" required hidden
           data-large-upload-allowed="{{ 'true' if large_upload_allowed else 'false' }}"
           data-google-drive-ready="{{ 'true' if google_drive_storage_ready else 'false' }}"
+          data-large-transfer-ready="{{ 'true' if large_transfer_ready else 'false' }}"
           data-standard-limit-bytes="{{ 5 * 1024**3 }}"
           data-approved-limit-bytes="{{ 50 * 1024**3 }}"
           data-github-limit-bytes="{{ 4 * 1024**2 }}">
@@ -76,7 +77,7 @@
           </span>
           <strong id="file-prompt">Choose a file to upload</strong>
           <span id="file-detail">Drag and drop it here, or <span class="browse-link">browse files</span></span>
-          <span class="file-hint">{% if google_drive_storage_ready %}Up to {{ upload_limit_gb }} GB per file via Google Drive{% if not large_upload_allowed %} · 50 GB access requires approval{% endif %}{% else %}Maximum 4 MB via GitHub storage{% endif %} · PDF, images, documents and archives</span>
+          <span class="file-hint">{% if google_drive_storage_ready and large_transfer_ready %}Up to {{ upload_limit_gb }} GB per file via Google Drive{% if not large_upload_allowed %} · 50 GB access requires approval{% endif %} · uploads resume automatically{% elif google_drive_storage_ready %}Maximum 4 MB until the large-transfer service is configured{% else %}Maximum 4 MB via GitHub storage{% endif %} · PDF, images, documents and archives</span>
         </label>
 
         <div class="selected-file" id="selected-file" hidden>
@@ -177,7 +178,7 @@
     </div>
     <div class="mini-stats">
       <div><strong>₹0</strong><span>Extra storage service</span></div>
-      <div><strong>{% if google_drive_storage_ready %}{{ upload_limit_gb }} GB{% else %}4 MB{% endif %}</strong><span>Per-file limit</span></div>
+      <div><strong>{% if google_drive_storage_ready and large_transfer_ready %}{{ upload_limit_gb }} GB{% else %}4 MB{% endif %}</strong><span>Per-file limit</span></div>
       <div><strong>QR</strong><span>Included</span></div>
     </div>
   </aside>
