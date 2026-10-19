@@ -9,6 +9,7 @@
   <meta name="description" content="QuickShare Cloud — share small files with a QR code, expiring links and download controls.">
   <title>{% block title %}QuickShare Cloud{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='11') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css', v='1') }}">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -59,6 +60,6 @@
     </footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="{{ url_for('static', filename='js/app.js', v='11') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='12') }}" defer></script>
 </body>
 </html>
