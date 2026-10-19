@@ -107,6 +107,9 @@
   function currentMaxBytes() {
     if (!fileInput) return 0;
     if (storageProviderSelect?.value === "google_drive" && fileInput.dataset.googleDriveReady === "true") {
+      if (fileInput.dataset.largeTransferReady !== "true") {
+        return dataBytes("githubLimitBytes", 4 * 1024 * 1024);
+      }
       return dataBytes(
         fileInput.dataset.largeUploadAllowed === "true" ? "approvedLimitBytes" : "standardLimitBytes",
         fileInput.dataset.largeUploadAllowed === "true" ? 50 * 1024 ** 3 : 5 * 1024 ** 3
@@ -118,6 +121,10 @@
   function updateUploadLimitHint() {
     if (!fileHint || !fileInput) return;
     if (storageProviderSelect?.value === "google_drive" && fileInput.dataset.googleDriveReady === "true") {
+      if (fileInput.dataset.largeTransferReady !== "true") {
+        fileHint.textContent = "Maximum 4 MB until the large-transfer service is configured";
+        return;
+      }
       const approved = fileInput.dataset.largeUploadAllowed === "true";
       fileHint.textContent = "Up to " + (approved ? "50 GB" : "5 GB") +
         (approved ? " per file" : " per file · 50 GB requires approval") +
