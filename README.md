@@ -1,64 +1,67 @@
 # QuickShare Cloud
 
-A college Cloud Computing mini-project for QR-code-based file sharing with Google sign-in, account-scoped share management, analytics, expiry enforcement, revocation, and scheduled cleanup.
+A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hosted on Vercel, with Google sign-in, account-scoped share management, expiring links and selectable GitHub or Google Drive file storage.
 
 ## Features
 
-- Google OpenID Connect sign-in using Authlib; verified Google email is required.
-- Uploads limited to 4 MB and restricted file-extension validation.
-- Files and share metadata stored in a separate public GitHub repository.
-- QR-code share pages that recipients can open without having a QuickShare account.
-- My Shares dashboard scoped to the signed-in Google account, with search, filters, links, QR downloads, and activity history.
-- Server-side revocation, expiration, download-limit checks, and recent download/access event logging.
-- Protected daily Vercel Cron cleanup for expired/revoked file entries.
-- CSRF checks for authenticated state-changing requests, security response headers, GitHub API rate-limit handling, and tests.
+- Google OpenID Connect sign-in; each account sees and manages only its own shares.
+- Upload files up to 4 MiB (Vercel Function payloads are limited to 4.5 MB).
+- Choose a file-storage provider per upload:
+  - **GitHub**: existing provider; file contents are public.
+  - **Google Drive**: file contents are uploaded to a private folder in the administrator's connected Drive.
+- Public QR-code share pages; recipients do not need to sign in.
+- Server-enforced expiry, download limits, revocation, recent activity, and automatic cleanup routed to the selected file provider.
+- Drive OAuth connection is restricted to the configured storage administrator.
+- CSRF checks, basic upload validation, GitHub API rate-limit handling, Drive API error handling, and GitHub Actions tests.
+
+## Architecture note: metadata is still on GitHub
+
+In this implementation, the **file bytes** may be stored in GitHub or in Google Drive depending on the provider selected during upload. Share metadata continues to be stored as JSON in the configured public GitHub storage repository for both options. This includes original filename, share expiry, download counts, event summaries and a keyed owner hash. Therefore Google Drive makes file contents private, but it does **not** make share metadata private. Use non-sensitive filenames and avoid placing private information in file names.
+
+Older GitHub shares continue to use the default `storage_provider: github` when no provider is specified. New shares remember their provider so download, revoke, expiry and cleanup use the matching backend.
 
 ## Local setup
 
 1. Install Python 3.10 or newer.
 2. Create and activate a virtual environment.
 3. Install dependencies: `pip install -r requirements-dev.txt`.
-4. Copy `.env.example` to `.env`; set GitHub and Google OAuth values.
-5. Configure the Google OAuth web client with this local redirect URI: `http://127.0.0.1:5000/auth/google/callback`.
+4. Copy `.env.example` to `.env`; configure the GitHub and regular Google sign-in settings.
+5. For Google Drive mode, configure the additional storage settings below.
 6. Run `python app.py`.
 
-Never commit `.env`. Use a fine-grained GitHub token restricted to `QuickShare-Storage`, with Contents: Read and write permission.
+Never commit `.env` or publish OAuth client secrets, refresh tokens, or GitHub tokens. Use a fine-grained GitHub token restricted to `QuickShare-Storage`, with Contents: Read and write permission.
 
-## Google OAuth setup
+## Google Drive storage setup
 
-In Google Cloud Console, create a project and configure the OAuth consent screen / Google Auth Platform. Create an OAuth client of type **Web application**. Add the exact local and deployed callback addresses under **Authorized redirect URIs**:
+1. In the same Google Cloud project, enable the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com).
+2. In Google Auth Platform → Clients → QuickShare Cloud Web, add this exact authorized redirect URI for the live custom domain: `https://qshare.darshanup.online/auth/google-drive/callback`. Keep the normal login callback too: `https://qshare.darshanup.online/auth/google/callback`.
+3. Add `STORAGE_ADMIN_EMAIL` in Vercel with the verified Google email address that will own the private Drive folder and files.
+4. Sign in to QuickShare using that account and open **Storage** in the navigation.
+5. Click **Connect Google Drive** and consent to `drive.file`. QuickShare asks only for access to files it creates/uses, not general access to all Drive files.
+6. Copy the one-time refresh token from the callback page directly into Vercel as `GOOGLE_DRIVE_REFRESH_TOKEN`. Also set `GOOGLE_DRIVE_REDIRECT_URI` to the exact callback URI. Keep the existing `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
+7. Redeploy. The upload form will then enable the Google Drive option.
 
-- Local: `http://127.0.0.1:5000/auth/google/callback`
-- Production: `https://YOUR-STABLE-VERCEL-DOMAIN/auth/google/callback`
+The Drive refresh token belongs to the storage administrator and must be kept secret. If it is revoked or expires, the Drive provider reports that it must be reconnected. Google states that refresh tokens for an external OAuth app in Testing status generally expire after seven days when non-basic scopes such as Drive access are requested. For ongoing use, review the app's publishing status in Google Auth Platform; if it is in Testing, expect to reconnect periodically.
 
-The production value must match `GOOGLE_REDIRECT_URI` exactly, including scheme, host, path, and trailing-slash choice. Use the stable Production domain shown under Vercel → Project → Settings → Domains, not an ephemeral deployment-preview URL. If the consent screen is in Testing mode, add the intended Google accounts as Test users.
+## Vercel Environment Variables
 
-Set the following Production Environment Variables in Vercel:
+Keep the existing GitHub and Google login variables. Add these for Google Drive:
 
-- `GITHUB_TOKEN`
-- `GITHUB_OWNER` = `Darshan-U-P`
-- `GITHUB_REPO` = `QuickShare-Storage`
-- `GITHUB_BRANCH` = `main`
-- `GOOGLE_CLIENT_ID`
-- `GOOGLE_CLIENT_SECRET`
-- `GOOGLE_REDIRECT_URI` = the exact production callback address above
-- `SECRET_KEY` = a random Flask session secret
-- `OWNER_HASH_SECRET` = a separate random secret; keep it stable across deployments
-- `CRON_SECRET` = a separate random bearer secret
-- `FLASK_DEBUG` = `0`
-- `MAX_CONTENT_LENGTH_MB` = `4`
+- `STORAGE_ADMIN_EMAIL` = the verified Google email permitted to connect storage.
+- `GOOGLE_DRIVE_REDIRECT_URI` = `https://qshare.darshanup.online/auth/google-drive/callback`
+- `GOOGLE_DRIVE_REFRESH_TOKEN` = the refresh token generated by the storage connection flow.
 
-Do not put OAuth client secrets or GitHub tokens in source code or in `.env.example`. After configuring variables, redeploy the application.
+The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` are configured. Setting or changing Vercel environment variables requires a redeploy before the running functions use the new values.
 
-## Account ownership
+## Storage limits and privacy
 
-A verified Google account is required to upload and manage files. Recipient-facing share pages and authorized downloads remain public to anyone holding a share link. Each new metadata record stores a keyed hash of the Google subject, not the Google email address. My Shares lists only records belonging to the current signed-in account. Shares created before Google ownership was added are not automatically claimed by any account and will not appear in My Shares.
+- **GitHub option:** the file contents are public and may be accessed directly even if a QuickShare link expires or is revoked.
+- **Google Drive option:** file content is private in the connected Drive account. QuickShare serves file bytes only after checking expiry, revocation and download count. Google Drive file IDs in metadata do not grant public access by themselves.
+- **Both options:** metadata is currently stored in the public GitHub repository. Metadata includes file name, file size, timing, download counts, activity summaries, provider, and a keyed owner hash. Do not use sensitive filenames.
+- Cleanup deletes a GitHub file from the latest branch revision (historical Git content may remain) or deletes the file from Google Drive, depending on provider.
+- This prototype uses GitHub Contents API as a metadata store and optimistic SHA updates; it is not a transactional database, so high-concurrency guarantees are limited.
+- The 4 MiB upload cap leaves some room under Vercel's 4.5 MB function request/response payload limit. Larger uploads should use a direct-to-Drive or resumable upload design.
 
-## Important limitations
+## Tests
 
-- **The GitHub storage repository is public.** Files and metadata in it must be treated as public. QuickShare's expiry/revocation/download limits cannot stop direct GitHub access.
-- Cleanup deletes the file from the current branch revision but does not erase earlier Git history.
-- GitHub's Contents API is a low-traffic prototype backend, not a transactional database. SHA-based conflict retry helps, but the service is not production-grade under high concurrency.
-- My Shares depends on GitHub metadata reads; more shares mean more API requests and can run into GitHub rate limits.
-- The 4 MiB cap leaves a small margin under Vercel Functions' 4.5 MB request/response payload limit. Larger files require a direct-to-storage upload architecture.
-- The project schedules `/api/cron/cleanup` daily at 03:00 UTC. Vercel Hobby cron runs once daily; exact execution minute is not guaranteed.
+Run `pytest -v`. GitHub Actions runs the test suite on pushes and pull requests to `main`.
