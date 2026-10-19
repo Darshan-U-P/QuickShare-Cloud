@@ -23,8 +23,8 @@ def make_metadata(share_id, *, revoked=False, downloads=0, max_downloads=3, owne
     }
 
 
-def sign_in(client, sub="test-google-subject", email="student@example.com"):
-    with client.session_transaction() as saved:
+def sign_in(client, sub="test-google-subject", email="student@example.com", base_url="http://localhost"):
+    with client.session_transaction(base_url=base_url) as saved:
         saved["user"] = {"sub": sub, "email": email, "name": "Test Student"}
         saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
 
@@ -167,15 +167,15 @@ def test_storage_settings_page_is_admin_only(monkeypatch):
     monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "student@example.com")
     monkeypatch.setattr(app_module.google_drive_storage, "is_configured", lambda: False)
     client = app_module.app.test_client()
-    sign_in(client)
-    response = client.get("/admin/storage")
+    sign_in(client, base_url="https://adminqshare.darshanup.online")
+    response = client.get("/admin/storage", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 200
     assert b"providers." in response.data
     assert b"Google Drive" in response.data
 
     other_client = app_module.app.test_client()
-    sign_in(other_client, sub="other-subject", email="other@example.com")
-    assert other_client.get("/admin/storage").status_code == 403
+    sign_in(other_client, sub="other-subject", email="other@example.com", base_url="https://adminqshare.darshanup.online")
+    assert other_client.get("/admin/storage", base_url="https://adminqshare.darshanup.online").status_code == 403
 
 
 def test_upload_can_select_google_drive_provider(monkeypatch):
@@ -592,7 +592,7 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
         save_allowlist,
     )
 
-    page = client.get("/admin/transfers")
+    page = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert page.status_code == 200
     assert b"Large transfer" in page.data
     assert b"Grant 50 GB access" in page.data
@@ -600,6 +600,7 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
 
     add = client.post(
         "/admin/transfers/add",
+        base_url="https://adminqshare.darshanup.online",
         data={
             "csrf_token": "csrf-test-token-which-is-long-enough",
             "email": "New.User@Example.com",
@@ -615,6 +616,7 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
 
     remove = client.post(
         "/admin/transfers/remove",
+        base_url="https://adminqshare.darshanup.online",
         data={
             "csrf_token": "csrf-test-token-which-is-long-enough",
             "email": "new.user@example.com",
@@ -628,7 +630,7 @@ def test_transfer_permissions_admin_panel_rejects_non_admin(monkeypatch):
     client = app_module.app.test_client()
     sign_in(client, email="student@example.com")
     monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
-    response = client.get("/admin/transfers")
+    response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 403
 
 
@@ -642,7 +644,7 @@ def test_transfer_permissions_admin_panel_shows_private_store_error(monkeypatch)
         raise app_module.StorageError("Drive permission file unavailable.")
 
     monkeypatch.setattr(app_module.google_drive_storage, "get_large_upload_allowlist", fail_read)
-    response = client.get("/admin/transfers")
+    response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 200
     assert b"Permissions could not be loaded" in response.data
     assert b"Drive permission file unavailable" in response.data
