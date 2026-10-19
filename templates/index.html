@@ -61,10 +61,11 @@
           <div class="select-wrap">
             <span class="field-icon" aria-hidden="true">☁</span>
             <select id="storage_provider" name="storage_provider">
-              <option value="github" selected>GitHub · Public file storage</option>
               {% if google_drive_storage_ready %}
-              <option value="google_drive">Google Drive · Private file storage</option>
+              <option value="google_drive" selected>Google Drive · Private shared storage</option>
+              <option value="github">GitHub · Public file storage</option>
               {% else %}
+              <option value="github" selected>GitHub · Public file storage</option>
               <option value="google_drive" disabled>Google Drive · Setup required</option>
               {% endif %}
             </select>
@@ -136,7 +137,7 @@
       <span class="privacy-icon" aria-hidden="true">!</span>
       <div>
         <strong>Only upload non-sensitive files</strong>
-        <p>GitHub file storage is public. Google Drive keeps file contents private. For either option, share metadata (including filename, expiry and download counts) is currently stored in the public GitHub repository.</p>
+        <p>GitHub file storage is public. Google Drive keeps file contents private in one shared storage account. For either option, share metadata (including filename, expiry and download counts) is currently stored in the public GitHub repository.</p>
       </div>
     </div>
     <div class="mini-stats">
