@@ -1,5 +1,6 @@
 import json
 import os
+import re
 import secrets
 import time
 from threading import Lock
@@ -244,6 +245,66 @@ def initiate_resumable_upload(
     if not isinstance(session_uri, str) or not session_uri.startswith("https://www.googleapis.com/upload/drive/v3/files?"):
         raise GoogleDriveStorageError("Google Drive did not return a valid resumable-upload session.")
     return session_uri
+
+
+
+def upload_resumable_chunk(
+    session_uri: str,
+    *,
+    start: int,
+    end: int,
+    total_size: int,
+    content: bytes,
+) -> dict:
+    """Forward one small browser-uploaded chunk from Vercel to Google's resumable session."""
+    if (
+        not isinstance(session_uri, str)
+        or not session_uri.startswith("https://www.googleapis.com/upload/drive/v3/files?")
+    ):
+        raise GoogleDriveStorageError("This resumable Google Drive upload session is invalid.")
+    if not isinstance(content, bytes) or not content:
+        raise GoogleDriveStorageError("The upload chunk is empty.")
+    if start < 0 or end < start or total_size <= end or len(content) != end - start + 1:
+        raise GoogleDriveStorageError("The upload chunk's byte range does not match its content.")
+    if len(content) > 4 * 1024 * 1024:
+        raise GoogleDriveStorageError("Upload chunks must be 4 MiB or smaller.")
+
+    try:
+        response = requests.put(
+            session_uri,
+            headers={
+                "Content-Type": "application/octet-stream",
+                "Content-Length": str(len(content)),
+                "Content-Range": f"bytes {start}-{end}/{total_size}",
+            },
+            data=content,
+            timeout=(15, 120),
+        )
+    except requests.RequestException as exc:
+        raise GoogleDriveStorageError(
+            "The connection to Google Drive was interrupted while forwarding a chunk. Retry this chunk."
+        ) from exc
+
+    if response.status_code == 308:
+        acknowledged_range = (getattr(response, "headers", {}) or {}).get("Range", "")
+        match = re.fullmatch(r"bytes=0-(\\d+)", acknowledged_range.strip())
+        next_offset = int(match.group(1)) + 1 if match else 0
+        if next_offset < 0 or next_offset > total_size:
+            raise GoogleDriveStorageError("Google Drive returned an invalid resumable-upload offset.")
+        return {"complete": False, "next_offset": next_offset}
+
+    if response.status_code in (200, 201):
+        try:
+            payload = response.json()
+        except ValueError as exc:
+            raise GoogleDriveStorageError("Google Drive completed the upload but returned invalid metadata.") from exc
+        if not isinstance(payload, dict) or not payload.get("id"):
+            raise GoogleDriveStorageError("Google Drive completed the upload without returning a file ID.")
+        return {"complete": True, "next_offset": total_size, "file": payload}
+
+    _raise_for_response(response, "uploading a resumable chunk")
+    raise GoogleDriveStorageError(f"Google Drive returned unexpected HTTP {response.status_code} for a chunk.")
+
 
 
 def verify_resumable_upload(
