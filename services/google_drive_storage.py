@@ -321,7 +321,7 @@ def upload_resumable_chunk(
         if status_response is not None:
             if status_response.status_code == 308:
                 status_range = (getattr(status_response, "headers", {}) or {}).get("Range", "")
-                status_match = re.fullmatch(r"bytes=0-(\\d+)", status_range.strip())
+                status_match = re.fullmatch(r"bytes=0-(\d+)", status_range.strip())
                 committed_offset = int(status_match.group(1)) + 1 if status_match else 0
                 if 0 <= committed_offset <= total_size:
                     return {"complete": False, "next_offset": committed_offset}
