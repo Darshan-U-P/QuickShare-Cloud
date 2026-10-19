@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Admin access denied · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="error-page not-admin-page">
+  <div class="error-illustration" aria-hidden="true"><span>!</span></div>
+  <div class="section-kicker">ADMIN ACCESS RESTRICTED</div>
+  <h1>You're not an admin.</h1>
+  <p>
+    The Google account
+    <strong>{{ account_email or "currently signed in" }}</strong>
+    is not authorized to access QuickShare administration.
+    Only the designated administrator account can manage storage and 50 GB transfer permissions.
+  </p>
+  <a class="btn btn-primary" href="https://qshare.darshanup.online/">
+    Return to QuickShare <span class="btn-arrow" aria-hidden="true">↗</span>
+  </a>
+</section>
+{% endblock %}
