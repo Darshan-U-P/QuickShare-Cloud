@@ -20,7 +20,6 @@ from flask import (
 
 from services import google_drive_storage
 from services.github_storage import (
-    GitHubStorageError,
     cleanup_expired_files,
     create_share_metadata,
     delete_storage_file as delete_github_file,
@@ -164,6 +163,7 @@ def _public_share_data(metadata: dict) -> dict:
         "max_downloads": int(metadata.get("max_downloads", 0)),
         "download_count": int(metadata.get("download_count", 0)),
         "status": share_status(metadata),
+        "storage_provider": metadata.get("storage_provider", "github"),
         "revoked_at": metadata.get("revoked_at"),
     }
 
