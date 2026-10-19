@@ -1,0 +1,87 @@
+{% extends "base.html" %}
+{% block title %}Storage Settings · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="dashboard-page storage-settings-page">
+  <a class="back-link" href="{{ url_for('index') }}">← Back to QuickShare</a>
+  <div class="dashboard-heading">
+    <div>
+      <div class="section-kicker">ADMIN SETTINGS</div>
+      <h1>Storage <span>providers.</span></h1>
+      <p>Choose where each file is stored. GitHub remains the share-metadata index for both providers.</p>
+    </div>
+    {% if drive_storage_ready %}
+      <span class="status-pill status-active"><i></i> Google Drive connected</span>
+    {% else %}
+      <span class="status-pill status-limit"><i></i> Google Drive setup required</span>
+    {% endif %}
+  </div>
+
+  <div class="storage-provider-cards">
+    <article class="card storage-provider-card">
+      <div class="storage-provider-icon storage-icon-github"><icon></icon> GH</div>
+      <div class="section-kicker">OPTION 1</div>
+      <h2>GitHub storage</h2>
+      <span class="status-pill status-limit"><i></i> Public files</span>
+      <p>Uses your existing QuickShare-Storage repository. Easy to keep working without additional OAuth setup, but anyone may access the file directly from the public repository.</p>
+      <ul><li>No additional setup</li><li>Files and metadata use GitHub</li><li>App limits cannot restrict direct repository access</li></ul>
+    </article>
+
+    <article class="card storage-provider-card">
+      <div class="storage-provider-icon storage-icon-drive">G</div>
+      <div class="section-kicker">OPTION 2</div>
+      <h2>Google Drive storage</h2>
+      {% if drive_storage_ready %}
+        <span class="status-pill status-active"><i></i> Connected</span>
+      {% else %}
+        <span class="status-pill status-limit"><i></i> Not connected</span>
+      {% endif %}
+      <p>Stores file contents in a private folder owned by the connected Google account. QuickShare serves downloads only after checking the share status.</p>
+      <ul><li>Private file contents</li><li>Expired or revoked files can be deleted from Drive</li><li>Metadata still lives in the public GitHub repository</li></ul>
+      {% if not drive_storage_ready %}
+        <a class="btn btn-primary storage-connect-button" href="{{ url_for('connect_google_drive') }}">Connect Google Drive ↗</a>
+      {% else %}
+        <p class="storage-connected-note">Connected storage account: {{ storage_admin_email }}</p>
+      {% endif %}
+    </article>
+  </div>
+
+  <section class="card storage-setup-instructions">
+    <div class="section-kicker">ONE-TIME SETUP</div>
+    <h2>Connect your storage account</h2>
+    <ol>
+      <li>Enable the <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">Google Drive API</a> in the same Google Cloud project.</li>
+      <li>In Google Auth Platform → Clients → QuickShare Cloud Web, add this exact Authorized redirect URI:</li>
+    </ol>
+    <div class="copy-row storage-callback-row">
+      <input id="drive-callback-uri" value="{{ drive_redirect_uri }}" readonly aria-label="Google Drive callback URL">
+      <button class="btn btn-copy" type="button" data-copy-target="drive-callback-uri">Copy callback</button>
+    </div>
+    <ol start="3">
+      <li>Set <code>STORAGE_ADMIN_EMAIL</code> in Vercel to the Google account that should own stored files.</li>
+      <li>Sign in to QuickShare with that same account, then click <strong>Connect Google Drive</strong> above.</li>
+      <li>Copy the refresh token shown after consent and add it to Vercel as <code>GOOGLE_DRIVE_REFRESH_TOKEN</code>. Keep <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> configured too.</li>
+      <li>Redeploy so Google Drive becomes available in the upload form.</li>
+    </ol>
+    <div class="storage-warning"><strong>Privacy note</strong><p>The file contents are private in Drive when the Google Drive option is selected. Share metadata—including original filename, expiry, download counts, and an account-owner hash—continues to be stored in the public GitHub repository. Avoid sensitive filenames. Google OAuth apps left in Testing mode can issue refresh tokens that expire after seven days for scopes beyond basic sign-in.</p></div>
+  </section>
+
+  {% if one_time_refresh_token %}
+  <section class="card drive-token-card">
+    <div class="section-kicker">SAVE THIS TOKEN NOW</div>
+    <h2>Google Drive authorization token</h2>
+    <p>This refresh token is shown only on this response. Copy it straight into Vercel as <code>GOOGLE_DRIVE_REFRESH_TOKEN</code>. Never share it, commit it, or paste it into chat.</p>
+    <textarea id="drive-refresh-token" rows="4" readonly spellcheck="false">{{ one_time_refresh_token }}</textarea>
+    <div class="file-actions">
+      <button type="button" class="btn btn-primary" id="copy-drive-refresh-token">Copy refresh token</button>
+      <a class="btn btn-secondary" href="{{ url_for('admin_storage') }}">I've saved it</a>
+    </div>
+  </section>
+  {% elif refresh_token_missing %}
+  <section class="card drive-token-card">
+    <h2>No refresh token returned</h2>
+    <p>Google did not return a new refresh token. Check that the OAuth authorization used offline access and consent. If you previously authorized this app, remove its existing access from your Google Account security settings, then try connecting again. Do not revoke access until you're ready to repeat the consent flow.</p>
+    <a class="btn btn-secondary" href="{{ url_for('connect_google_drive') }}">Try consent again</a>
+  </section>
+  {% endif %}
+</section>
+{% endblock %}
