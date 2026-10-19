@@ -648,6 +648,190 @@
     updateUploadLimitHint();
   }
 
+  // Large private files are downloaded as bounded ranges. Chromium's
+  // File System Access API writes each range directly to disk, avoiding a giant Blob.
+  const largeDownloadButton = document.getElementById("start-large-download");
+  if (largeDownloadButton) {
+    const shareId = largeDownloadButton.dataset.shareId || "";
+    const totalBytes = Number(largeDownloadButton.dataset.fileSize || 0);
+    const fileName = largeDownloadButton.dataset.fileName || "quickshare-download.bin";
+    const chunkSize = Math.min(4 * 1024 * 1024, Number(largeDownloadButton.dataset.chunkSize || 4 * 1024 * 1024));
+    const progressWrap = document.getElementById("large-download-progress");
+    const statusLabel = document.getElementById("large-download-status");
+    const percentLabel = document.getElementById("large-download-percent");
+    const progressBar = document.getElementById("large-download-bar");
+    const detail = document.getElementById("large-download-detail");
+    let currentTicket = "";
+    let ticketExpiresAt = 0;
+    let refreshPromise = null;
+
+    function setDownloadProgress(done, message) {
+      const percent = totalBytes > 0 ? Math.min(100, Math.floor(done / totalBytes * 100)) : 0;
+      if (progressWrap) progressWrap.hidden = false;
+      if (statusLabel) statusLabel.textContent = message || "Downloading file…";
+      if (percentLabel) percentLabel.textContent = percent + "%";
+      if (progressBar) progressBar.style.width = percent + "%";
+      if (detail) detail.textContent = formatSize(done) + " of " + formatSize(totalBytes) + " downloaded";
+    }
+
+    async function postDownloadJson(url, payload) {
+      const response = await fetch(url, {
+        method: "POST",
+        credentials: "same-origin",
+        headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+        body: JSON.stringify(payload || {})
+      });
+      const data = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(data.error || ("Download request failed (HTTP " + response.status + ")."));
+      return data;
+    }
+
+    async function refreshTicket(force) {
+      if (!force && ticketExpiresAt > Math.floor(Date.now() / 1000) + 90) return;
+      if (refreshPromise) return refreshPromise;
+      refreshPromise = (async () => {
+        const data = await postDownloadJson("/api/download/refresh", { ticket: currentTicket });
+        currentTicket = data.ticket;
+        ticketExpiresAt = Number(data.ticket_expires_at || 0);
+      })();
+      try {
+        await refreshPromise;
+      } finally {
+        refreshPromise = null;
+      }
+    }
+
+    async function fetchRange(start, end) {
+      let lastError = null;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          await refreshTicket(false);
+          const response = await fetch("/api/download/chunk", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: { "Content-Type": "application/json", "X-CSRF-Token": csrfToken },
+            body: JSON.stringify({ ticket: currentTicket, start, end })
+          });
+          if (response.ok && response.status === 206) {
+            const bytes = await response.arrayBuffer();
+            if (bytes.byteLength !== end - start + 1) throw new Error("Received an incomplete file range.");
+            return bytes;
+          }
+          const data = await response.json().catch(() => ({}));
+          const error = new Error(data.error || ("File range request failed (HTTP " + response.status + ")."));
+          if (response.status === 410 && /ticket needs refreshing/i.test(error.message)) {
+            await refreshTicket(true);
+            continue;
+          }
+          if (![408, 429, 500, 502, 503, 504].includes(response.status)) throw error;
+          lastError = error;
+        } catch (error) {
+          lastError = error;
+          if (/expired or was revoked|share has expired|no longer exists|invalid or the share has expired/i.test(error.message || "")) {
+            throw error;
+          }
+        }
+        if (attempt < 4) await pause(Math.min(10000, 700 * (2 ** attempt)));
+      }
+      throw lastError || new Error("This file range could not be downloaded after several retries.");
+    }
+
+    async function loadTicket() {
+      const data = await postDownloadJson("/api/download/initiate/" + encodeURIComponent(shareId), {});
+      currentTicket = data.ticket;
+      ticketExpiresAt = Number(data.ticket_expires_at || 0);
+    }
+
+    async function downloadToFile(writable) {
+      await loadTicket();
+      const concurrency = 4;
+      let done = 0;
+      setDownloadProgress(0, "Starting secure download…");
+      for (let groupStart = 0; groupStart < totalBytes; groupStart += chunkSize * concurrency) {
+        await refreshTicket(false);
+        const ranges = [];
+        for (let slot = 0; slot < concurrency; slot++) {
+          const start = groupStart + slot * chunkSize;
+          if (start >= totalBytes) break;
+          ranges.push({ start, end: Math.min(totalBytes - 1, start + chunkSize - 1) });
+        }
+        const parts = await Promise.all(ranges.map(range => fetchRange(range.start, range.end)));
+        for (let i = 0; i < ranges.length; i++) {
+          await writable.write({ type: "write", position: ranges[i].start, data: parts[i] });
+          done += parts[i].byteLength;
+        }
+        setDownloadProgress(done, "Downloading from private Drive…");
+      }
+      await writable.close();
+      setDownloadProgress(totalBytes, "Download complete");
+      if (detail) detail.textContent = "Saved " + fileName + " to the location you selected.";
+    }
+
+    async function downloadWithBlob() {
+      if (totalBytes > 512 * 1024 * 1024) {
+        throw new Error("This browser cannot safely save a multi-gigabyte file directly to disk. Open this link in desktop Microsoft Edge or Google Chrome.");
+      }
+      await loadTicket();
+      const chunks = [];
+      let done = 0;
+      const concurrency = 4;
+      setDownloadProgress(0, "Preparing browser download…");
+      for (let groupStart = 0; groupStart < totalBytes; groupStart += chunkSize * concurrency) {
+        await refreshTicket(false);
+        const ranges = [];
+        for (let slot = 0; slot < concurrency; slot++) {
+          const start = groupStart + slot * chunkSize;
+          if (start >= totalBytes) break;
+          ranges.push({ start, end: Math.min(totalBytes - 1, start + chunkSize - 1) });
+        }
+        const parts = await Promise.all(ranges.map(range => fetchRange(range.start, range.end)));
+        parts.forEach(part => { chunks.push(part); done += part.byteLength; });
+        setDownloadProgress(done, "Downloading file…");
+      }
+      const blob = new Blob(chunks, { type: "application/octet-stream" });
+      const objectUrl = URL.createObjectURL(blob);
+      const anchor = document.createElement("a");
+      anchor.href = objectUrl;
+      anchor.download = fileName;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(objectUrl), 60_000);
+      setDownloadProgress(totalBytes, "Download ready");
+    }
+
+    largeDownloadButton.addEventListener("click", async () => {
+      largeDownloadButton.disabled = true;
+      const originalLabel = largeDownloadButton.innerHTML;
+      largeDownloadButton.innerHTML = "<span aria-hidden=\"true\">…</span> Preparing download…";
+      let writable = null;
+      try {
+        if (totalBytes <= 0 || !shareId) throw new Error("This share has invalid download details.");
+        if (typeof window.showSaveFilePicker === "function") {
+          // Call the picker before awaiting any network operations; browsers require a user gesture.
+          const fileHandle = await window.showSaveFilePicker({ suggestedName: fileName });
+          writable = await fileHandle.createWritable();
+          await downloadToFile(writable);
+          writable = null;
+        } else {
+          await downloadWithBlob();
+        }
+        showToast("File download completed.");
+        largeDownloadButton.innerHTML = "✓ Download complete";
+      } catch (error) {
+        if (writable && typeof writable.abort === "function") {
+          try { await writable.abort(); } catch (_ignored) {}
+        }
+        showToast(error.message || "Download failed. Please retry.");
+        if (statusLabel) statusLabel.textContent = "Download stopped";
+        if (detail) detail.textContent = error.message || "The file was not fully downloaded.";
+        largeDownloadButton.innerHTML = originalLabel;
+      } finally {
+        largeDownloadButton.disabled = false;
+      }
+    });
+  }
+
   const driveTokenButton = document.getElementById("copy-drive-refresh-token");
   if (driveTokenButton) {
     driveTokenButton.addEventListener("click", async () => {
