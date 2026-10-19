@@ -397,7 +397,7 @@
   function updateStorageProviderHelp() {
     if (!storageProviderSelect || !storageProviderHelp) return;
     if (storageProviderSelect.value === "google_drive") {
-      storageProviderHelp.textContent = "File contents stay private in the connected Google Drive. Share metadata remains in the public GitHub repository.";
+      storageProviderHelp.textContent = "File contents are stored in the administrator's connected Drive for all users. Share metadata remains in the public GitHub repository.";
       storageProviderHelp.classList.add("storage-help-private");
     } else {
       storageProviderHelp.textContent = "GitHub file contents are public and can be accessed outside QuickShare, even after a link expires.";
