@@ -500,3 +500,105 @@
   border-color: rgba(138,239,220,.35);
   background: rgba(138,239,220,.06);
 }
+
+
+/* Mobile layout fix: keep supporting cards stacked instead of squeezing
+   them side by side inside the narrow upload page. */
+@media (max-width: 700px) {
+  .site-shell,
+  #main-content,
+  .workspace-grid,
+  .workspace-grid > *,
+  .side-column,
+  .side-column > * {
+    min-width: 0;
+    max-width: 100%;
+  }
+
+  .workspace-grid-focused {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .side-column {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    flex-direction: initial;
+    gap: 14px;
+    width: 100%;
+  }
+
+  .how-card,
+  .privacy-note,
+  .mini-stats {
+    width: 100%;
+    min-width: 0;
+    grid-column: auto;
+  }
+
+  .how-step {
+    grid-template-columns: 42px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .how-step > div,
+  .privacy-note > div {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+
+  .mini-stats {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 0;
+  }
+
+  .mini-stats > div {
+    min-width: 0;
+    padding: 13px 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .mini-stats strong {
+    font-size: clamp(16px, 4.4vw, 22px);
+  }
+
+  .mini-stats span {
+    font-size: 10px;
+    overflow-wrap: anywhere;
+  }
+
+  .privacy-note p,
+  .how-step p {
+    overflow-wrap: anywhere;
+  }
+
+  .upload-card,
+  .card {
+    min-width: 0;
+  }
+
+  .dropzone .file-hint {
+    max-width: 100%;
+    white-space: normal;
+    line-height: 1.6;
+    border-radius: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .selected-file-copy,
+  .upload-progress,
+  .upload-progress-detail {
+    min-width: 0;
+    overflow-wrap: anywhere;
+  }
+}
+
+@media (max-width: 380px) {
+  .site-shell { width: calc(100% - 22px); }
+  .upload-card { padding: 18px 13px; }
+  .how-card { padding: 19px 16px; }
+  .privacy-note { padding: 14px; }
+  .mini-stats { gap: 6px; }
+  .mini-stats > div { padding: 11px 7px; }
+  .mini-stats span { font-size: 9px; }
+}
