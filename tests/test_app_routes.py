@@ -565,3 +565,84 @@ def test_upload_chunk_rejects_malformed_range_before_forwarding(monkeypatch):
         },
     )
     assert response.status_code == 400
+
+
+
+def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client, sub="storage-admin-sub", email="admin@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    approved = set()
+
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "get_large_upload_allowlist",
+        lambda: sorted(approved),
+    )
+
+    def save_allowlist(emails):
+        approved.clear()
+        approved.update(email.lower() for email in emails)
+        return sorted(approved)
+
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "set_large_upload_allowlist",
+        save_allowlist,
+    )
+
+    page = client.get("/admin/transfers")
+    assert page.status_code == 200
+    assert b"Large transfer" in page.data
+    assert b"Grant 50 GB access" in page.data
+    assert b"No accounts approved yet" in page.data
+
+    add = client.post(
+        "/admin/transfers/add",
+        data={
+            "csrf_token": "csrf-test-token-which-is-long-enough",
+            "email": "New.User@Example.com",
+        },
+    )
+    assert add.status_code == 302
+    assert approved == {"new.user@example.com"}
+
+    updated_page = client.get("/admin/transfers")
+    assert updated_page.status_code == 200
+    assert b"new.user@example.com" in updated_page.data
+    assert b"50 GB per file" in updated_page.data
+
+    remove = client.post(
+        "/admin/transfers/remove",
+        data={
+            "csrf_token": "csrf-test-token-which-is-long-enough",
+            "email": "new.user@example.com",
+        },
+    )
+    assert remove.status_code == 302
+    assert approved == set()
+
+
+def test_transfer_permissions_admin_panel_rejects_non_admin(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client, email="student@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    response = client.get("/admin/transfers")
+    assert response.status_code == 403
+
+
+def test_transfer_permissions_admin_panel_shows_private_store_error(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client, sub="storage-admin-sub", email="admin@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+
+    def fail_read():
+        raise app_module.StorageError("Drive permission file unavailable.")
+
+    monkeypatch.setattr(app_module.google_drive_storage, "get_large_upload_allowlist", fail_read)
+    response = client.get("/admin/transfers")
+    assert response.status_code == 200
+    assert b"Permissions could not be loaded" in response.data
+    assert b"Drive permission file unavailable" in response.data
