@@ -211,7 +211,7 @@ def get_large_upload_allowlist() -> list[str]:
         if not isinstance(value, str):
             continue
         email = value.strip().lower()
-        if email and len(email) <= 254 and re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+        if email and len(email) <= 254 and re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             normalized.add(email)
     return sorted(normalized)
 
@@ -223,7 +223,7 @@ def set_large_upload_allowlist(emails: list[str]) -> list[str]:
         if not isinstance(value, str):
             continue
         email = value.strip().lower()
-        if not email or len(email) > 254 or not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+        if not email or len(email) > 254 or not re.fullmatch(r"[^@\s]+@[^@\s]+\.[^@\s]+", email):
             raise GoogleDriveStorageError("One of the approved email addresses is invalid.")
         normalized.add(email)
     approved = sorted(normalized)
@@ -262,12 +262,12 @@ def set_large_upload_allowlist(emails: list[str]) -> list[str]:
             "appProperties": {"quickshareConfigKey": LARGE_UPLOAD_CONFIG_KEY},
         }
         body = (
-            f"--{boundary}\\r\\n"
-            "Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n"
+            f"--{boundary}\r\n"
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
             + json.dumps(metadata, separators=(",", ":"))
-            + f"\\r\\n--{boundary}\\r\\n"
-            "Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n"
-        ).encode("utf-8") + payload + f"\\r\\n--{boundary}--\\r\\n".encode("utf-8")
+            + f"\r\n--{boundary}\r\n"
+            "Content-Type: application/json; charset=UTF-8\r\n\r\n"
+        ).encode("utf-8") + payload + f"\r\n--{boundary}--\r\n".encode("utf-8")
         try:
             response = requests.post(
                 f"{DRIVE_UPLOAD_API}/files",
