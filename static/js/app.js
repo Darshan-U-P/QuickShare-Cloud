@@ -295,8 +295,13 @@
       card.appendChild(metricWrap);
 
       const actions = element("div", "share-list-actions");
-      actions.appendChild(makeButton("Copy link", "btn-secondary", () => copyText(currentLink(record.share_id))));
+      actions.appendChild(makeButton("Copy share link", "btn-secondary", () => copyText(currentLink(record.share_id))));
       if (record.status === "active") {
+        const directLink = window.location.origin + "/download/" + encodeURIComponent(record.share_id);
+        actions.appendChild(makeButton("Copy download link", "btn-secondary", () => copyText(directLink)));
+        const download = element("a", "btn btn-primary", "Download file");
+        download.href = "/download/" + encodeURIComponent(record.share_id);
+        actions.appendChild(download);
         const qr = element("a", "btn btn-secondary", "Save QR");
         qr.href = "/qr/" + encodeURIComponent(record.share_id) + ".png";
         qr.download = "quickshare-" + record.share_id + ".png";
