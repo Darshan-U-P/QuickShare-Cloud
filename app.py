@@ -526,11 +526,6 @@ def api_upload_initiate():
         "revoked": False,
         "cleanup_status": "pending",
     }
-    upload_ticket_data = {
-        "metadata": metadata,
-        "upload_nonce": upload_nonce,
-        "session_uri": session_uri,
-    }
     try:
         session_uri = google_drive_storage.initiate_resumable_upload(
             storage_path=storage_path,
@@ -543,6 +538,11 @@ def api_upload_initiate():
         app.logger.warning("Could not start resumable Drive upload: %s", exc)
         return jsonify({"error": str(exc)}), 502
 
+    upload_ticket_data = {
+        "metadata": metadata,
+        "upload_nonce": upload_nonce,
+        "session_uri": session_uri,
+    }
     upload_ticket = _upload_ticket_serializer().dumps(upload_ticket_data)
     return jsonify({
         "upload_ticket": upload_ticket,
