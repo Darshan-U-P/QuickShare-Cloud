@@ -64,7 +64,9 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 - **Both options:** metadata is currently stored in the public GitHub repository. Metadata includes file name, file size, timing, download counts, activity summaries, provider, and a keyed owner hash. Do not use sensitive filenames.
 - Cleanup deletes a GitHub file from the latest branch revision (historical Git content may remain) or deletes the file from Google Drive, depending on provider.
 - This prototype uses GitHub Contents API as a metadata store and optimistic SHA updates; it is not a transactional database, so high-concurrency guarantees are limited.
-- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel authorizes the upload and creates a resumable session; the browser sends the file bytes directly to Google's upload endpoint. Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function response stays below Vercel's 4.5 MB response-body limit.
+- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel authorizes the upload and creates a resumable session. The sender's browser slices the file locally, then posts chunks of at most 4 MiB to a same-origin Vercel endpoint; the function forwards each chunk to Google's upload session. This avoids relying on direct cross-origin requests from the browser to Google's upload host while keeping each Vercel request below its payload limit. Google Drive assembles the chunks into one complete private file.
+
+Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function request/response is bounded, but large transfers still use Vercel invocations and bandwidth.
 
 ## Large-file transfers (5 GB standard / 50 GB approved)
 
@@ -81,7 +83,7 @@ For downloads larger than 4 MiB, QuickShare displays a downloader page. In deskt
 
 ### Important trade-offs
 
-- A 5 GiB download takes about 1,280 Vercel range requests; a 50 GiB download takes about 12,800. These requests consume Vercel function invocations and network transfer, so check plan quotas/usage before promoting 50 GB transfers to many users.
+- A 5 GiB file needs about 1,280 upload chunks and 1,280 download ranges; a 50 GiB file needs about 12,800 of each. Upload chunks and download ranges consume Vercel function invocations and network transfer, so check plan quotas/usage before promoting 50 GB transfers to many users.
 - If the browser does not support the File System Access API, the fallback is limited to smaller downloads to avoid exhausting browser memory. For 5–50 GB files, use a recent desktop Edge or Chrome browser.
 - A link's expiry is embedded in each signed download ticket. The app refreshes the ticket periodically and checks current revocation/expiry when refreshing. Revocation can therefore take effect at the next ticket refresh for an already-started large download.
 - A 50 GB per-file limit does not increase the central Google Drive account's available storage quota. Ensure the Drive account has sufficient free space.
