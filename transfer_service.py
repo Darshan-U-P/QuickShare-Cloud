@@ -136,6 +136,18 @@ def _claim_ticket(ticket_id: str, expires_at: int):
     return "", row
 
 
+def _unclaim_ticket_if_new(ticket_id: str, cookie_secret: str):
+    """Allow a retry if Drive rejected the initial stream before any bytes were sent."""
+    if not cookie_secret:
+        return
+    with _connect_db() as conn:
+        conn.execute(
+            "DELETE FROM download_tickets WHERE ticket_id = ? AND cookie_hash = ? "
+            "AND ranges_json = '[]' AND completed = 0",
+            (ticket_id, _cookie_digest(cookie_secret)),
+        )
+
+
 def _ticket_allowed(ticket_id: str, expires_at: int):
     row = _read_ticket(ticket_id)
     if row is None:
@@ -221,21 +233,29 @@ def download_from_drive(token: str):
     try:
         upstream = google_drive_storage.open_private_file_stream(payload["file_id"], range_header)
     except StorageError:
+        if is_new:
+            _unclaim_ticket_if_new(ticket_id, cookie_secret)
         app.logger.exception("Could not open Drive stream for ticket %s", ticket_id)
         abort(502, description="Google Drive could not open the file. Try again from the share page.")
 
     if is_range and upstream.status_code != 206:
         upstream.close()
+        if is_new:
+            _unclaim_ticket_if_new(ticket_id, cookie_secret)
         abort(502, description="Google Drive did not honor the requested byte range.")
     upstream_range = upstream.headers.get("Content-Range", "")
     if upstream_range:
         match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", upstream_range)
         if not match:
             upstream.close()
+            if is_new:
+                _unclaim_ticket_if_new(ticket_id, cookie_secret)
             abort(502, description="Google Drive returned an invalid byte range.")
         actual_start, actual_end, actual_total = map(int, match.groups())
         if actual_total != size or actual_start != start or actual_end > end:
             upstream.close()
+            if is_new:
+                _unclaim_ticket_if_new(ticket_id, cookie_secret)
             abort(502, description="Google Drive returned an unexpected byte range.")
         start, end = actual_start, actual_end
     elif not is_range:
@@ -244,9 +264,11 @@ def download_from_drive(token: str):
     content_length = int(upstream.headers.get("Content-Length", end - start + 1))
     if content_length != end - start + 1:
         upstream.close()
+        if is_new:
+            _unclaim_ticket_if_new(ticket_id, cookie_secret)
         abort(502, description="Google Drive returned an incomplete file segment.")
 
-    filename = str(payload["filename"])
+    filename = "".join(ch for ch in str(payload["filename"]) if ch not in "\\r\\n\\0")
     fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename).strip() or "download.bin"
     disposition = f'attachment; filename="{fallback.replace(chr(34), "_")}"; filename*=UTF-8\'\'{quote(filename)}'
     expected_cookie_hash = _cookie_digest(cookie_secret)
