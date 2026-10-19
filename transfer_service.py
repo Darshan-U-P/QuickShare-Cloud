@@ -63,7 +63,7 @@ def _parse_range(value: str, size: int):
     """Return a normalized single byte range or raise ValueError."""
     if not value:
         return 0, size - 1, False
-    match = re.fullmatch(r"bytes=(\\d*)-(\\d*)", value.strip())
+    match = re.fullmatch(r"bytes=(\d*)-(\d*)", value.strip())
     if not match or (not match.group(1) and not match.group(2)):
         raise ValueError("Only a single byte range is supported.")
     first, last = match.groups()
@@ -229,7 +229,7 @@ def download_from_drive(token: str):
         abort(502, description="Google Drive did not honor the requested byte range.")
     upstream_range = upstream.headers.get("Content-Range", "")
     if upstream_range:
-        match = re.fullmatch(r"bytes (\\d+)-(\\d+)/(\\d+)", upstream_range)
+        match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", upstream_range)
         if not match:
             upstream.close()
             abort(502, description="Google Drive returned an invalid byte range.")
@@ -246,7 +246,7 @@ def download_from_drive(token: str):
         upstream.close()
         abort(502, description="Google Drive returned an incomplete file segment.")
 
-    filename = str(payload["filename"]).replace("\\r", "").replace("\\n", "").replace("\\0", "")
+    filename = str(payload["filename"])
     fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename).strip() or "download.bin"
     disposition = f'attachment; filename="{fallback.replace(chr(34), "_")}"; filename*=UTF-8\'\'{quote(filename)}'
     expected_cookie_hash = _cookie_digest(cookie_secret)
