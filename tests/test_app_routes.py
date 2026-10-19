@@ -375,3 +375,54 @@ def test_finalize_resumable_upload_verifies_owner_and_saves_metadata(monkeypatch
     assert saved[0]["drive_file_id"] == "drive-file-test"
     assert saved[0]["file_size"] == 1024 * 1024
     assert saved[0]["owner_id_hash"] == expected_owner_hash()
+
+
+
+def test_transfer_validation_rejects_revoked_or_expired_share(monkeypatch):
+    share_id = "d" * 32
+    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "test-transfer-secret-long-enough")
+    metadata = make_metadata(share_id, revoked=True)
+    metadata.update({
+        "storage_provider": "google_drive",
+        "drive_file_id": "drive-transfer-id",
+        "file_size": 2048,
+    })
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
+    serializer = app_module._transfer_ticket_serializer()
+    ticket = serializer.dumps({
+        "jti": "e" * 32,
+        "share_id": share_id,
+        "file_id": "drive-transfer-id",
+        "filename": "demo.bin",
+        "size": 2048,
+        "exp_at": int(datetime.now(timezone.utc).timestamp()) + 600,
+    })
+    client = app_module.app.test_client()
+    response = client.post("/api/transfer/validate", json={"ticket": ticket})
+    assert response.status_code == 410
+    assert response.json["error"]
+
+
+def test_transfer_validation_allows_live_ticket_even_if_reserved_last_download(monkeypatch):
+    share_id = "f" * 32
+    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "test-transfer-secret-long-enough")
+    # The Vercel route reserves a download before redirecting to the transfer host.
+    metadata = make_metadata(share_id, downloads=3, max_downloads=3)
+    metadata.update({
+        "storage_provider": "google_drive",
+        "drive_file_id": "drive-transfer-id",
+        "file_size": 2048,
+    })
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
+    serializer = app_module._transfer_ticket_serializer()
+    ticket = serializer.dumps({
+        "jti": "1" * 32,
+        "share_id": share_id,
+        "file_id": "drive-transfer-id",
+        "filename": "demo.bin",
+        "size": 2048,
+        "exp_at": int(datetime.now(timezone.utc).timestamp()) + 600,
+    })
+    response = app_module.app.test_client().post("/api/transfer/validate", json={"ticket": ticket})
+    assert response.status_code == 200
+    assert response.json == {"allowed": True}
