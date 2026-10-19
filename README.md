@@ -83,10 +83,11 @@ Large transfers need a persistent download host in addition to the Vercel web ap
 2. On the VPS, clone/pull this repo into `/opt/quickshare-cloud`; install Python, create `.venv`, then run `.venv/bin/pip install -r requirements.txt gunicorn`.
 3. Create a dedicated service account named `quickshare` and a persistent writable directory: `/var/lib/quickshare-transfer`.
 4. Copy `deploy/quickshare-transfer.env.example` to `/etc/quickshare-transfer.env`. Fill in the same `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` used by the web app; set `TRANSFER_TOKEN_SECRET` to a long random secret. Protect the file with `chmod 600 /etc/quickshare-transfer.env`.
-5. Install `deploy/quickshare-transfer.service` as `/etc/systemd/system/quickshare-transfer.service`. Confirm the service user, repo path and venv path in the unit match the actual VPS setup. Then run `systemctl daemon-reload`, `systemctl enable --now quickshare-transfer`.
-6. Configure the VPS HTTPS reverse proxy for `transfer.qshare.darshanup.online` to `127.0.0.1:8081`. `deploy/Caddyfile.transfer.example` is an example for Caddy; adapt it if the VPS already uses Nginx or another proxy.
-7. Verify `https://transfer.qshare.darshanup.online/health` returns `{"status":"ok","service":"QuickShare transfer"}`.
-8. In Vercel Production, set `TRANSFER_SERVICE_URL=https://transfer.qshare.darshanup.online`, set the **same** `TRANSFER_TOKEN_SECRET`, and set `LARGE_UPLOAD_ALLOWED_EMAILS` to the email addresses you approve. Redeploy.
+5. In `/etc/quickshare-transfer.env`, set `TRANSFER_WEB_BASE_URL=https://qshare.darshanup.online`. The transfer service re-validates each initial/ranged download against the current QuickShare metadata, so revocation and expiry continue to apply after the redirect.
+6. Install `deploy/quickshare-transfer.service` as `/etc/systemd/system/quickshare-transfer.service`. Confirm the service user, repo path and venv path in the unit match the actual VPS setup. Then run `systemctl daemon-reload`, `systemctl enable --now quickshare-transfer`.
+7. Configure the VPS HTTPS reverse proxy for `transfer.qshare.darshanup.online` to `127.0.0.1:8081`. `deploy/Caddyfile.transfer.example` is an example for Caddy; adapt it if the VPS already uses Nginx or another proxy.
+8. Verify `https://transfer.qshare.darshanup.online/health` returns `{"status":"ok","service":"QuickShare transfer"}`.
+9. In Vercel Production, set `TRANSFER_SERVICE_URL=https://transfer.qshare.darshanup.online`, set the **same** `TRANSFER_TOKEN_SECRET`, and set `LARGE_UPLOAD_ALLOWED_EMAILS` to the email addresses you approve. Redeploy.
 
 Use the same Google Drive folder configuration on both the Vercel app and VPS if `GOOGLE_DRIVE_FOLDER_ID` is set. Never commit the actual transfer secret or Drive credentials. The central Drive account must have enough free storage for the uploaded files; a 50 GB per-file application permission does not increase the Drive account's quota.
 
