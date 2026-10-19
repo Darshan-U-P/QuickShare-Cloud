@@ -294,6 +294,69 @@ The following public and transfer API routes describe the current app shape. The
 | Latest changes are not visible | Confirm the latest `main` commit has a Vercel deployment with status **Ready**, then hard-refresh the browser. |
 | Vercel reports `build-rate-limit` | Wait for the limit to clear and redeploy the latest commit; repeated redeploy clicks do not bypass a rate limit. |
 
+
+ 
+## PostgreSQL data foundation and expiry-driven deletion
+
+The initial PostgreSQL schema and an idempotent legacy-data importer are included as a pre-cutover foundation. Production continues to read and write GitHub JSON metadata until a later phase switches every share operation to PostgreSQL. Adding a database URL alone does not switch the live app.
+
+### Schema entities
+
+| Table | Purpose |
+|---|---|
+| users | Private account identity, normalized email, stable owner hash, and optional hashed Google subject |
+| files | One row per physical storage object, provider/object reference, size, SHA-256 content hash, and deletion lifecycle |
+| shares | Stable public share ID, owner, file reference, expiry, limits, revocation and legacy metadata |
+| download_events | Append-only download/rejection events with unique idempotency keys |
+| upload_sessions | Resumable upload state, idempotency key, expected/received bytes, encrypted provider-session URL field, expiry and errors |
+| transfer_permissions | Normalized email approvals and per-file size tier |
+| cleanup_jobs | Retryable, leased storage-deletion jobs with attempt counts and outcomes |
+| audit_logs | Administrative and lifecycle actions without storing secrets |
+
+The schema uses UUID primary keys, unique constraints, foreign keys, restrictive deletion rules, check constraints, and indexes for owner history, expiry scans, hashes and cleanup queues. The migration runner records a SHA-256 checksum for every applied migration and refuses to run if an already-applied migration file has been edited. Create a new numbered SQL file for future changes.
+
+### File lifecycle and deletion
+
+The deletion system is designed around the physical file, not just the public share link:
+
+1. A share becomes unavailable at its expiry time even if a scheduled cleanup has not run yet.
+2. The cleanup worker finds files whose shares are expired, revoked, or out of downloads.
+3. Before deleting storage, the worker locks the file row and checks for any unexpired, unrevoked share that still has downloads remaining.
+4. If another active share references the same file, deletion is cancelled and the file is retained.
+5. Otherwise the worker marks the file as deleting, removes the Google Drive object or GitHub storage object, then records the result.
+6. Failed deletions are retried with bounded exponential backoff. Jobs use leases, row locking and SKIP LOCKED claiming to support concurrent workers safely.
+7. The database retains a tombstone and audit trail after the physical object is deleted; metadata is not erased before the storage deletion outcome is known.
+
+The current GitHub-backed production cleanup remains enabled during this first phase. Its Vercel Cron invocation is daily and processes a bounded number of records. On Vercel Hobby, Cron is limited to once per day, so physical deletion can be delayed until the next scheduled run even though the expired link is already unusable. The PostgreSQL cleanup worker must not be activated against a stale imported snapshot; it becomes the production cleanup path only after the full PostgreSQL application cutover.
+
+### Configure PostgreSQL
+
+1. Create a managed PostgreSQL database from a provider that supports standard PostgreSQL connection URLs and TLS.
+2. Add DATABASE_URL to local .env and Vercel Production. Use the provider's pooled connection string when offered. Never commit a live database URL.
+3. Keep the serverless pool small initially by using DATABASE_POOL_MAX_SIZE=2.
+4. Apply the schema migration from the repository root:
+
+        python -m scripts.db_migrate
+
+5. Preview the legacy metadata migration without modifying PostgreSQL:
+
+        python -m scripts.migrate_github_metadata
+
+6. After reviewing the counts and errors, import idempotently:
+
+        python -m scripts.migrate_github_metadata --apply
+
+7. Inspect row counts, expiry candidates, public share IDs and storage references before any production cutover.
+
+The importer preserves existing public share IDs and maps legacy owner hashes into private user rows. Legacy records do not contain the original Google subject or account email, so those fields remain empty until the account signs in after a later cutover. The importer is resumable/idempotent and does not delete stored files.
+
+**Do not switch public share reads or activate PostgreSQL cleanup yet.** The running app has not been switched to PostgreSQL in this phase. The existing GitHub repository remains the source of truth until a separately tested cutover is implemented. This staged approach avoids losing uploads made while the migration is being prepared.
+
+### New environment variables
+
+- DATABASE_URL: PostgreSQL connection URI, unset by default.
+- DATABASE_POOL_MAX_SIZE: process-local connection pool ceiling; default 2, capped at 5.
+
 ## Tests
 
 Install the development dependencies and run:
