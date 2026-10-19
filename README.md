@@ -26,7 +26,7 @@ QuickShare Cloud is a QR-code and expiring-link file-sharing web application bui
 
 - Google sign-in using OpenID Connect.
 - My Shares dashboard: users can manage only the shares associated with their own authenticated Google account.
-- Google Drive private storage, using one central administrator-connected Drive account for the application's users.
+- Google Drive private storage, using one centrally configured Drive account for the application's users.
 - GitHub storage as an optional alternative for small files; GitHub-stored file contents are public.
 - Resumable, chunked upload: standard accounts can upload files up to **5 GB**; accounts explicitly approved by the administrator can upload files up to **50 GB**.
 - Upload progress feedback, bounded chunks, retries, and server-side validation.
@@ -49,7 +49,7 @@ flowchart TD
     Recipient[Recipient browser] -->|Share page and access checks| App
     Recipient -->|4 MiB byte-range requests| App
     App -->|Authenticated byte-range reads| Drive
-    Admin[Admin browser] -->|Admin subdomain + Google session| App
+    Operator[Authorized operator] -->|Verified session| App
     App -->|Private allowlist configuration| Drive
     Cron[Vercel Cron] -->|Bearer-secret cleanup request| App
 ```
@@ -58,7 +58,7 @@ flowchart TD
 
 | Component | Responsibility |
 |---|---|
-| `app.py` | Flask routes, authentication, CSRF validation, upload/download ticket handling, share policy, admin authorization, and API responses. |
+| `app.py` | Flask routes, authentication, CSRF validation, upload/download ticket handling, share policy, privileged-access checks, and API responses. |
 | `services/google_drive_storage.py` | Refreshes Google OAuth access tokens, creates the private application folder, starts resumable uploads, forwards chunks, validates finished files, reads byte ranges, manages the private permission file, and deletes Drive files. |
 | `services/github_storage.py` | Reads and updates share metadata through the GitHub Contents API, serves GitHub-hosted public files, records download activity, revokes shares, and runs cleanup. |
 | `templates/` | Server-rendered HTML pages, including the upload UI, share page, My Shares dashboard, storage settings, and large-download page. |
@@ -163,7 +163,7 @@ Requirements: Python 3.10 or newer and a Google/GitHub configuration if you want
 
 6. Open `http://127.0.0.1:5000`.
 
-Do not commit `.env`, access tokens, refresh tokens, GitHub tokens, or client secrets. Some privileged routes require the configured deployment hostname; tests exercise them using a simulated host.
+Do not commit `.env`, access tokens, refresh tokens, GitHub tokens, or client secrets. Restricted management routes also validate the request host; tests exercise this using a simulated host.
 
 ## Production deployment
 
@@ -222,7 +222,7 @@ The approved 50 GB account list is stored in private Google Drive configuration;
 1. In the correct Google Cloud project, enable the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com).
 2. Add both callback URLs listed in [Production deployment](#production-deployment) to the OAuth client's **Authorized redirect URIs**.
 3. In Google Auth Platform → Data access, ensure the application requests the `https://www.googleapis.com/auth/drive.file` scope in its separate Drive consent flow.
-4. In Google Auth Platform → Audience, add the administrator account as a test user if the OAuth app is in Testing mode.
+4. In Google Auth Platform → Audience, add the storage-owner Google account as a test user if the OAuth app is in Testing mode.
 5. Sign in using the configured storage-owner Google account and complete the Drive connection flow. Review and approve the requested permissions.
 6. Copy the refresh token shown by the callback directly into Vercel's `GOOGLE_DRIVE_REFRESH_TOKEN` value and redeploy.
 
@@ -232,7 +232,7 @@ Never commit credentials or paste a refresh token into an issue, chat, screensho
 
 ## Routes and APIs
 
-The following routes describe the current app shape. API endpoints require the appropriate signed-in session, ticket, or cron bearer secret as applicable.
+The following public and transfer API routes describe the current app shape. They require the appropriate signed-in session, signed ticket, or cron bearer secret as applicable.
 
 | Route | Purpose |
 |---|---|
@@ -284,12 +284,12 @@ The following routes describe the current app shape. API endpoints require the a
 | Symptom | What to check |
 |---|---|
 | `Google Drive authorization expired or was revoked` | Reconnect Drive through the authorized storage-management flow, replace `GOOGLE_DRIVE_REFRESH_TOKEN` in Vercel, and redeploy. |
-| `Access blocked` or account not allowed | Add the admin Google account to Google Auth Platform → Audience → Test users if the app is in Testing mode. |
+| `Access blocked` or account not allowed | Add the Google account used for central storage connection to Google Auth Platform → Audience → Test users if the app is in Testing mode. |
 | `Google hasn't verified this app` | This warning can appear for an unverified/testing OAuth app. Continue only if you control and trust this app and the scopes shown are expected. |
 | Upload fails before progress starts | Open browser developer tools → Network and the Vercel Function logs. Check the response from `/api/uploads/initiate` or `/api/uploads/chunk`; do not share tokens or client secrets. |
-| Large upload is rejected at 5 GB | Confirm the signed-in Google email is listed in the admin Transfer Permissions panel and start a new upload session after approval. |
-| Privileged settings are unavailable | Confirm the configured management host is assigned to the Vercel project and that you are signed in with the authorized account. |
-| “You're not an admin” | Sign in with the verified Google account configured by the project owner for privileged access. |
+| Large upload is rejected at 5 GB | Ask the application operator to check whether your signed-in Google account has been approved for the higher upload tier, then start a new upload session. |
+
+
 | Sign-in does not persist across application subdomains | Confirm HTTPS and the production session-cookie configuration for the application's deployed hostnames. |
 | Latest changes are not visible | Confirm the latest `main` commit has a Vercel deployment with status **Ready**, then hard-refresh the browser. |
 | Vercel reports `build-rate-limit` | Wait for the limit to clear and redeploy the latest commit; repeated redeploy clicks do not bypass a rate limit. |
@@ -303,4 +303,4 @@ pip install -r requirements-dev.txt
 pytest -v
 ```
 
-The tests cover authentication, CSRF enforcement, per-user share ownership, storage-provider selection, 5 GB/50 GB upload-tier enforcement, Drive upload finalization, upload-chunk forwarding, private large-download ranges, admin-host restrictions, and the “not an admin” denial behavior. GitHub Actions runs the test suite on pushes and pull requests to `main`.
+The tests cover authentication, CSRF enforcement, per-user share ownership, storage-provider selection, 5 GB/50 GB upload-tier enforcement, Drive upload finalization, upload-chunk forwarding, private large-download ranges, and restricted-route access checks. GitHub Actions runs the test suite on pushes and pull requests to `main`.
