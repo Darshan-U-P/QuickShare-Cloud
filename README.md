@@ -5,14 +5,16 @@ A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hos
 ## Features
 
 - Google OpenID Connect sign-in; each account sees and manages only its own shares.
-- Upload files up to 4 MiB (Vercel Function payloads are limited to 4.5 MB).
+- Resumable Google Drive uploads: 5 GB per file by default; accounts explicitly approved by the administrator may upload up to 50 GB per file.
+- File contents upload directly from the browser to Google Drive in resumable chunks, avoiding Vercel's request-body limit.
+- A separate VPS streaming service handles large private downloads and byte-range resume; Vercel stays the web/control plane.
 - Choose a file-storage provider per upload:
   - **Google Drive**: once the administrator connects one Drive account, this becomes the default central storage for every user's uploads; file contents stay private in that account.
   - **GitHub**: retained as an alternative; file contents are public.
 - Public QR-code share pages; recipients do not need to sign in.
 - Server-enforced expiry, download limits, revocation, recent activity, and automatic cleanup routed to the selected file provider.
 - Drive OAuth connection is restricted to the configured storage administrator.
-- CSRF checks, basic upload validation, GitHub API rate-limit handling, Drive API error handling, and GitHub Actions tests.
+- CSRF checks, server-side file-size authorization, Drive upload-finalization verification, signed download tickets, and GitHub Actions tests.
 
 ## Architecture note: metadata is still on GitHub
 
@@ -62,7 +64,31 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 - **Both options:** metadata is currently stored in the public GitHub repository. Metadata includes file name, file size, timing, download counts, activity summaries, provider, and a keyed owner hash. Do not use sensitive filenames.
 - Cleanup deletes a GitHub file from the latest branch revision (historical Git content may remain) or deletes the file from Google Drive, depending on provider.
 - This prototype uses GitHub Contents API as a metadata store and optimistic SHA updates; it is not a transactional database, so high-concurrency guarantees are limited.
-- The 4 MiB upload cap leaves some room under Vercel's 4.5 MB function request/response payload limit. Larger uploads should use a direct-to-Drive or resumable upload design.
+- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel only authorizes the upload and creates a resumable session; the browser sends the file bytes directly to Google's upload endpoint. Large downloads are streamed by `transfer_service.py` on a persistent VPS because the Vercel function body and execution limits make it unsuitable as a 5–50 GB data plane.
+
+## Large-file transfers (5 GB standard / 50 GB approved)
+
+Large transfers need a persistent download host in addition to the Vercel web app. The repo includes `transfer_service.py`, which streams private Drive files without buffering the whole file in RAM and supports HTTP byte-range requests. Deploy it on the existing VPS before enabling uploads above 4 MiB; otherwise the app will reject large-file upload initiation rather than create shares that cannot be downloaded.
+
+### Permission model
+
+- Standard signed-in Google accounts may upload up to 5 GB per file.
+- Add approved verified Google account emails to Vercel `LARGE_UPLOAD_ALLOWED_EMAILS`, comma-separated, to allow those accounts up to 50 GB per file.
+- Approval is server-side; changing the browser/UI cannot raise an account's permitted limit.
+- Large files must use the central Google Drive option. GitHub storage stays the small-file/public option.
+
+### VPS deployment
+
+1. Create a DNS **A** record for `transfer.qshare.darshanup.online` pointing to the public IP of the existing VPS.
+2. On the VPS, clone/pull this repo into `/opt/quickshare-cloud`; install Python, create `.venv`, then run `.venv/bin/pip install -r requirements.txt gunicorn`.
+3. Create a dedicated service account named `quickshare` and a persistent writable directory: `/var/lib/quickshare-transfer`.
+4. Copy `deploy/quickshare-transfer.env.example` to `/etc/quickshare-transfer.env`. Fill in the same `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` used by the web app; set `TRANSFER_TOKEN_SECRET` to a long random secret. Protect the file with `chmod 600 /etc/quickshare-transfer.env`.
+5. Install `deploy/quickshare-transfer.service` as `/etc/systemd/system/quickshare-transfer.service`. Confirm the service user, repo path and venv path in the unit match the actual VPS setup. Then run `systemctl daemon-reload`, `systemctl enable --now quickshare-transfer`.
+6. Configure the VPS HTTPS reverse proxy for `transfer.qshare.darshanup.online` to `127.0.0.1:8081`. `deploy/Caddyfile.transfer.example` is an example for Caddy; adapt it if the VPS already uses Nginx or another proxy.
+7. Verify `https://transfer.qshare.darshanup.online/health` returns `{"status":"ok","service":"QuickShare transfer"}`.
+8. In Vercel Production, set `TRANSFER_SERVICE_URL=https://transfer.qshare.darshanup.online`, set the **same** `TRANSFER_TOKEN_SECRET`, and set `LARGE_UPLOAD_ALLOWED_EMAILS` to the email addresses you approve. Redeploy.
+
+Use the same Google Drive folder configuration on both the Vercel app and VPS if `GOOGLE_DRIVE_FOLDER_ID` is set. Never commit the actual transfer secret or Drive credentials. The central Drive account must have enough free storage for the uploaded files; a 50 GB per-file application permission does not increase the Drive account's quota.
 
 ## Tests
 
