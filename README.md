@@ -180,10 +180,10 @@ A new GitHub commit does not mean the new code is already live: check the matchi
 
 ### Google OAuth callback URLs
 
-In Google Auth Platform → Clients → the QuickShare web OAuth client, keep these authorized redirect URIs:
+In Google Auth Platform → Clients → your web OAuth client, add authorized redirect URIs that match your own deployment domain. The following are examples only; replace `your-domain.example` with your real application domain:
 
-- Regular user login: `https://qshare.darshanup.online/auth/google/callback`
-- Google Drive connection: `https://qshare.darshanup.online/auth/google-drive/callback`
+- Regular user login: `https://your-domain.example/auth/google/callback`
+- Google Drive connection: `https://your-domain.example/auth/google-drive/callback`
 
 Both callback values must match the authorized redirect URIs in Google Auth Platform and the values configured in the deployment environment.
 
