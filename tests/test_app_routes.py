@@ -570,7 +570,7 @@ def test_upload_chunk_rejects_malformed_range_before_forwarding(monkeypatch):
 
 def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
     client = app_module.app.test_client()
-    sign_in(client, sub="storage-admin-sub", email="admin@example.com")
+    sign_in(client, sub="storage-admin-sub", email="admin@example.com", base_url="https://adminqshare.darshanup.online")
     monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     approved = set()
@@ -609,7 +609,7 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
     assert add.status_code == 302
     assert approved == {"new.user@example.com"}
 
-    updated_page = client.get("/admin/transfers")
+    updated_page = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert updated_page.status_code == 200
     assert b"new.user@example.com" in updated_page.data
     assert b"50 GB per file" in updated_page.data
@@ -628,7 +628,7 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
 
 def test_transfer_permissions_admin_panel_rejects_non_admin(monkeypatch):
     client = app_module.app.test_client()
-    sign_in(client, email="student@example.com")
+    sign_in(client, email="student@example.com", base_url="https://adminqshare.darshanup.online")
     monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
     response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 403
