@@ -1,4 +1,7 @@
+import hashlib
+import hmac
 import io
+import os
 from datetime import datetime, timedelta, timezone
 
 import app as app_module
@@ -24,6 +27,12 @@ def sign_in(client, sub="test-google-subject", email="student@example.com"):
     with client.session_transaction() as saved:
         saved["user"] = {"sub": sub, "email": email, "name": "Test Student"}
         saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
+
+
+
+def expected_owner_hash(sub="test-google-subject"):
+    key = str(os.getenv("OWNER_HASH_SECRET") or app_module.app.config["SECRET_KEY"]).encode("utf-8")
+    return hmac.new(key, sub.encode("utf-8"), hashlib.sha256).hexdigest()
 
 
 def test_health_endpoint_works():
@@ -65,8 +74,7 @@ def test_my_shares_api_uses_current_account_hash(monkeypatch):
     assert response.status_code == 200
     assert response.json == {"shares": []}
     assert len(calls) == 1
-    expected = app_module._current_owner_hash()
-    assert calls[0] == expected
+    assert calls[0] == expected_owner_hash()
 
 
 def test_executable_upload_is_rejected_before_storage(monkeypatch):
@@ -144,7 +152,7 @@ def test_revoke_endpoint_scopes_action_to_authenticated_account(monkeypatch):
     assert response.status_code == 200
     assert response.json["status"] == "revoked"
     assert captured[0][0] == "f" * 32
-    assert captured[0][1] == app_module._current_owner_hash()
+    assert captured[0][1] == expected_owner_hash()
 
 
 def test_cleanup_endpoint_requires_bearer_secret(monkeypatch):
