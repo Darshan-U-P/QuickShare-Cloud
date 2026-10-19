@@ -205,9 +205,9 @@ Configure these in Vercel Production and in `.env` for local development where r
 | `GITHUB_BRANCH` | No | Branch for content writes; defaults to `main`. |
 | `GOOGLE_CLIENT_ID` | Yes for Google login/Drive | Web OAuth client ID from Google Cloud. |
 | `GOOGLE_CLIENT_SECRET` | Yes for Google login/Drive | OAuth client secret. Never publish it. |
-| `GOOGLE_REDIRECT_URI` | Recommended in production | Exact normal login callback: `https://qshare.darshanup.online/auth/google/callback`. |
+| `GOOGLE_REDIRECT_URI` | Recommended in production | Example: `https://your-domain.example/auth/google/callback`; replace the example domain with your deployment domain. |
 | `STORAGE_ADMIN_EMAIL` | Yes for Drive connection and privileged settings | Verified Google account authorized to manage the central storage connection. Keep the value in deployment settings, not source control or public documentation. |
-| `GOOGLE_DRIVE_REDIRECT_URI` | Yes for Drive OAuth | Exact Drive callback: `https://qshare.darshanup.online/auth/google-drive/callback`. |
+| `GOOGLE_DRIVE_REDIRECT_URI` | Yes for Drive OAuth | Example: `https://your-domain.example/auth/google-drive/callback`; replace the example domain with your deployment domain. |
 | `GOOGLE_DRIVE_REFRESH_TOKEN` | Yes for private Drive storage | Refresh token shown by the Drive connection callback. Do not use an access token or client secret in its place. |
 | `GOOGLE_DRIVE_FOLDER_ID` | Optional | Use a specific authorized Drive folder ID if desired; otherwise the app ensures its application folder. |
 | `MAX_CONTENT_LENGTH_MB` | No | Flask request-body cap; default and maximum currently are 4 MiB to fit Vercel's request payload constraint. |
