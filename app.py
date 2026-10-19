@@ -383,6 +383,7 @@ def inject_storage_settings():
         "large_upload_allowed": _large_upload_allowed(),
         "upload_limit_gb": 50 if _large_upload_allowed() else 5,
         "large_transfer_ready": _large_transfer_ready(),
+        "admin_panel_base_url": ADMIN_PANEL_BASE_URL,
     }
 
 
