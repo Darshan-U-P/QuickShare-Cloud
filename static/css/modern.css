@@ -473,3 +473,30 @@
   .transfer-approved-row .btn { padding: 9px 10px; min-width: auto; }
   .transfer-permission-panel { padding: 20px 17px; }
 }
+
+
+/* Admin tools remain visually grouped inside the private admin subdomain. */
+.admin-subnav {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  margin: -2px 0 16px;
+}
+.admin-subnav a {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 1px solid rgba(153,176,229,.2);
+  border-radius: 12px;
+  background: rgba(255,255,255,.025);
+  color: #cbd7ff;
+  font-size: 12px;
+  font-weight: 750;
+  text-decoration: none;
+  transition: border-color .18s ease, background .18s ease;
+}
+.admin-subnav a:hover {
+  border-color: rgba(138,239,220,.35);
+  background: rgba(138,239,220,.06);
+}
