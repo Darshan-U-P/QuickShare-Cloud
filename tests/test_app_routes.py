@@ -269,3 +269,109 @@ def test_unconnected_drive_keeps_github_as_default(monkeypatch):
     page = response.data.decode()
     assert '<option value="github" selected>GitHub · Public file storage</option>' in page
     assert '<option value="google_drive" disabled>Google Drive · Setup required</option>' in page
+
+
+
+def test_standard_account_cannot_initialize_upload_over_5_gb(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    monkeypatch.delenv("LARGE_UPLOAD_ALLOWED_EMAILS", raising=False)
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "initiate_resumable_upload",
+        lambda **_kwargs: (_ for _ in ()).throw(AssertionError("Oversized upload must be rejected before Drive session creation")),
+    )
+    response = client.post(
+        "/api/uploads/initiate",
+        headers={"X-CSRF-Token": "csrf-test-token-which-is-long-enough"},
+        json={
+            "filename": "movie.mp4",
+            "file_size": 5 * 1024**3 + 1,
+            "mime_type": "video/mp4",
+            "storage_provider": "google_drive",
+            "expiry": "24h",
+            "max_downloads": 3,
+        },
+    )
+    assert response.status_code == 413
+    assert "5 GB" in response.json["error"]
+
+
+def test_approved_account_can_initialize_upload_up_to_50_gb(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    monkeypatch.setenv("LARGE_UPLOAD_ALLOWED_EMAILS", "other@example.com, STUDENT@example.com")
+    monkeypatch.setenv("TRANSFER_SERVICE_URL", "https://transfer.example.com")
+    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "unit-test-transfer-secret-which-is-long")
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    seen = []
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "initiate_resumable_upload",
+        lambda **kwargs: seen.append(kwargs) or "https://www.googleapis.com/upload/drive/v3/files?upload_id=test",
+    )
+    response = client.post(
+        "/api/uploads/initiate",
+        headers={"X-CSRF-Token": "csrf-test-token-which-is-long-enough"},
+        json={
+            "filename": "archive.zip",
+            "file_size": 40 * 1024**3,
+            "mime_type": "application/zip",
+            "storage_provider": "google_drive",
+            "expiry": "24h",
+            "max_downloads": 3,
+        },
+    )
+    assert response.status_code == 200
+    assert response.json["chunk_size"] == 32 * 1024 * 1024
+    assert response.json["upload_session_url"].endswith("upload_id=test")
+    assert seen[0]["file_size"] == 40 * 1024**3
+
+
+def test_finalize_resumable_upload_verifies_owner_and_saves_metadata(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(client)
+    monkeypatch.setenv("TRANSFER_SERVICE_URL", "https://transfer.example.com")
+    monkeypatch.setenv("TRANSFER_TOKEN_SECRET", "unit-test-transfer-secret-which-is-long")
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "initiate_resumable_upload",
+        lambda **_kwargs: "https://www.googleapis.com/upload/drive/v3/files?upload_id=test",
+    )
+    saved = []
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "verify_resumable_upload",
+        lambda file_id, **_kwargs: {"id": file_id, "size": str(1024 * 1024)},
+    )
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _share_id: None)
+    monkeypatch.setattr(app_module, "create_share_metadata", lambda metadata: saved.append(metadata))
+
+    initiated = client.post(
+        "/api/uploads/initiate",
+        headers={"X-CSRF-Token": "csrf-test-token-which-is-long-enough"},
+        json={
+            "filename": "sample.bin",
+            "file_size": 1024 * 1024,
+            "mime_type": "application/octet-stream",
+            "storage_provider": "google_drive",
+            "expiry": "24h",
+            "max_downloads": 3,
+        },
+    )
+    assert initiated.status_code == 200
+    response = client.post(
+        "/api/uploads/finalize",
+        headers={"X-CSRF-Token": "csrf-test-token-which-is-long-enough"},
+        json={
+            "upload_ticket": initiated.json["upload_ticket"],
+            "drive_file_id": "drive-file-test",
+        },
+    )
+    assert response.status_code == 200
+    assert response.json["status"] == "success"
+    assert saved[0]["drive_file_id"] == "drive-file-test"
+    assert saved[0]["file_size"] == 1024 * 1024
+    assert saved[0]["owner_id_hash"] == expected_owner_hash()
