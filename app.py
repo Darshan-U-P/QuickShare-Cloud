@@ -606,56 +606,6 @@ def api_upload_finalize():
     })
 
 
-@app.post("/api/transfer/validate")
-def api_transfer_validate():
-    """Let the VPS re-check expiry/revocation before each large-file stream or range."""
-    if not _transfer_ticket_serializer():
-        return jsonify({"error": "Transfer tickets are not configured."}), 503
-    data = request.get_json(silent=True) or {}
-    ticket = data.get("ticket", "")
-    if not isinstance(ticket, str) or not ticket:
-        return jsonify({"error": "Missing transfer ticket."}), 400
-    try:
-        payload = _transfer_ticket_serializer().loads(
-            ticket, max_age=TRANSFER_TICKET_MAX_AGE_SECONDS
-        )
-    except SignatureExpired:
-        return jsonify({"error": "The transfer ticket expired."}), 410
-    except BadSignature:
-        return jsonify({"error": "Invalid transfer ticket."}), 403
-    if not isinstance(payload, dict):
-        return jsonify({"error": "Invalid transfer ticket."}), 403
-
-    share_id = str(payload.get("share_id", ""))
-    if not SHARE_ID_PATTERN.fullmatch(share_id):
-        return jsonify({"error": "Invalid share reference."}), 403
-    metadata = get_share_metadata(share_id)
-    if not metadata:
-        return jsonify({"error": "This share no longer exists."}), 404
-    if (
-        metadata.get("storage_provider") != "google_drive"
-        or not payload.get("file_id")
-        or not hmac.compare_digest(
-            str(metadata.get("drive_file_id", "")),
-            str(payload.get("file_id", "")),
-        )
-    ):
-        return jsonify({"error": "This transfer does not match the stored share."}), 403
-    try:
-        expected_size = int(metadata.get("file_size", 0))
-        ticket_size = int(payload.get("size", 0))
-        expires = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
-        if expires.tzinfo is None:
-            expires = expires.replace(tzinfo=timezone.utc)
-    except (TypeError, ValueError):
-        return jsonify({"error": "The share's stored expiry or file size is invalid."}), 403
-    if expected_size != ticket_size or expected_size < 1 or expected_size > MAX_APPROVED_UPLOAD_BYTES:
-        return jsonify({"error": "This transfer does not match the stored file size."}), 403
-    if metadata.get("revoked") or expires <= datetime.now(timezone.utc):
-        return jsonify({"error": "This share has expired or was revoked."}), 410
-    return jsonify({"allowed": True}), 200
-
-
 @app.post("/upload")
 @login_required
 def upload():
