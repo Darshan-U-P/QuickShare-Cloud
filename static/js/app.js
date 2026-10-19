@@ -390,4 +390,46 @@
     time.textContent = formatDate(raw);
     time.title = date.toLocaleString();
   });
+
+  // Storage provider chooser explains the visibility trade-off before upload.
+  const storageProviderSelect = document.getElementById("storage_provider");
+  const storageProviderHelp = document.getElementById("storage-provider-help");
+  function updateStorageProviderHelp() {
+    if (!storageProviderSelect || !storageProviderHelp) return;
+    if (storageProviderSelect.value === "google_drive") {
+      storageProviderHelp.textContent = "File contents stay private in the connected Google Drive. Share metadata remains in the public GitHub repository.";
+      storageProviderHelp.classList.add("storage-help-private");
+    } else {
+      storageProviderHelp.textContent = "GitHub file contents are public and can be accessed outside QuickShare, even after a link expires.";
+      storageProviderHelp.classList.remove("storage-help-private");
+    }
+  }
+  if (storageProviderSelect) {
+    storageProviderSelect.addEventListener("change", updateStorageProviderHelp);
+    updateStorageProviderHelp();
+  }
+
+  const driveTokenButton = document.getElementById("copy-drive-refresh-token");
+  if (driveTokenButton) {
+    driveTokenButton.addEventListener("click", async () => {
+      const tokenInput = document.getElementById("drive-refresh-token");
+      if (!tokenInput) return;
+      const token = tokenInput.value;
+      try {
+        if (navigator.clipboard && window.isSecureContext) {
+          await navigator.clipboard.writeText(token);
+        } else {
+          tokenInput.focus();
+          tokenInput.select();
+          if (!document.execCommand("copy")) throw new Error("Copy failed");
+        }
+        showToast("Refresh token copied. Add it to Vercel Environment Variables now.");
+      } catch (_error) {
+        tokenInput.focus();
+        tokenInput.select();
+        showToast("Automatic copy failed. Copy the selected token manually.");
+      }
+    });
+  }
+
 })();
