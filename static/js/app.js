@@ -276,7 +276,7 @@
       );
       copy.append(
         titleRow,
-        element("p", "share-list-subtitle", formatSize(record.file_size) + " · Uploaded " + formatDate(record.upload_time)),
+        element("p", "share-list-subtitle", formatSize(record.file_size) + " · " + (record.storage_provider === "google_drive" ? "Google Drive · private" : "GitHub · public") + " · Uploaded " + formatDate(record.upload_time)),
         element("small", "share-list-id", "ID " + record.share_id.slice(0, 8) + "…")
       );
       main.append(icon, copy);
