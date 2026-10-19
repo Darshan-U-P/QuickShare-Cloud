@@ -18,10 +18,12 @@ from flask import (
     send_file, session, url_for,
 )
 
+from services import google_drive_storage
 from services.github_storage import (
     GitHubStorageError,
     cleanup_expired_files,
     create_share_metadata,
+    delete_storage_file as delete_github_file,
     download_public_file,
     get_share_analytics,
     get_share_metadata,
@@ -30,8 +32,9 @@ from services.github_storage import (
     record_rejected_attempt,
     revoke_share,
     share_status as calculate_share_status,
-    upload_file_bytes,
+    upload_file_bytes as upload_github_file_bytes,
 )
+from services.storage_errors import StorageError
 
 BASE_DIR = Path(__file__).resolve().parent
 load_dotenv(BASE_DIR / ".env")
@@ -52,6 +55,16 @@ oauth.register(
     client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
     server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
     client_kwargs={"scope": "openid email profile"},
+)
+
+# Storage authorization is separate from regular user sign-in. It is requested
+# only by the configured storage administrator and uses the narrow drive.file scope.
+oauth.register(
+    name="google_drive",
+    client_id=os.getenv("GOOGLE_CLIENT_ID", ""),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET", ""),
+    server_metadata_url="https://accounts.google.com/.well-known/openid-configuration",
+    client_kwargs={"scope": "openid email profile https://www.googleapis.com/auth/drive.file"},
 )
 
 EXPIRATION_OPTIONS = {
@@ -137,7 +150,7 @@ def make_share_url(share_id: str) -> str:
 def share_status(file_record: dict) -> str:
     try:
         return calculate_share_status(file_record)
-    except GitHubStorageError:
+    except StorageError:
         return "invalid"
 
 
@@ -164,6 +177,40 @@ def _is_current_user_owner(metadata: dict) -> bool:
         and stored_hash
         and hmac.compare_digest(owner_hash, stored_hash)
     )
+
+
+
+def _is_storage_admin() -> bool:
+    user = _current_user()
+    admin_email = os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower()
+    return bool(user and admin_email and user.get("email", "").strip().lower() == admin_email)
+
+
+def _drive_storage_ready() -> bool:
+    return google_drive_storage.is_configured()
+
+
+def upload_file_bytes(storage_provider: str, storage_path: str, content: bytes, share_id: str) -> dict:
+    """Route a new file to its selected provider while keeping share metadata in GitHub."""
+    if storage_provider == "google_drive":
+        return google_drive_storage.upload_file_bytes(storage_path, content, share_id)
+    if storage_provider == "github":
+        return upload_github_file_bytes(storage_path, content, share_id)
+    raise StorageError("Choose a valid storage provider.")
+
+
+def download_share_file(metadata: dict) -> bytes:
+    if metadata.get("storage_provider", "github") == "google_drive":
+        return google_drive_storage.download_private_file(metadata.get("drive_file_id", ""))
+    return download_public_file(metadata["storage_path"])
+
+
+@app.context_processor
+def inject_storage_settings():
+    return {
+        "is_storage_admin": _is_storage_admin(),
+        "google_drive_storage_ready": _drive_storage_ready(),
+    }
 
 
 @app.after_request
@@ -243,6 +290,66 @@ def my_shares():
     return render_template("my_shares.html")
 
 
+@app.get("/admin/storage")
+@login_required
+def admin_storage():
+    if not _is_storage_admin():
+        abort(403)
+    redirect_uri = os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True)
+    return render_template(
+        "drive_setup.html",
+        drive_storage_ready=_drive_storage_ready(),
+        storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
+        drive_redirect_uri=redirect_uri,
+    )
+
+
+@app.get("/admin/storage/google-drive/connect")
+@login_required
+def connect_google_drive():
+    if not _is_storage_admin():
+        abort(403)
+    if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
+        flash("Google OAuth client credentials must be configured first.", "error")
+        return redirect(url_for("admin_storage"))
+    session["drive_connect_pending"] = True
+    redirect_uri = os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True)
+    return oauth.google_drive.authorize_redirect(
+        redirect_uri,
+        access_type="offline",
+        prompt="consent",
+        include_granted_scopes="true",
+    )
+
+
+@app.get("/auth/google-drive/callback")
+def google_drive_callback():
+    if not _is_storage_admin() or not session.pop("drive_connect_pending", False):
+        abort(403)
+    try:
+        token = oauth.google_drive.authorize_access_token()
+        userinfo = token.get("userinfo")
+        if not userinfo:
+            userinfo = oauth.google_drive.userinfo(token=token)
+        email = str(userinfo.get("email", "")).strip().lower()
+        if userinfo.get("email_verified") is not True or email != os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower():
+            flash("Connect Drive using the Google account configured as STORAGE_ADMIN_EMAIL.", "error")
+            return redirect(url_for("admin_storage"))
+        refresh_token = str(token.get("refresh_token") or "").strip()
+        return render_template(
+            "drive_setup.html",
+            drive_storage_ready=_drive_storage_ready(),
+            storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
+            drive_redirect_uri=os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True),
+            one_time_refresh_token=refresh_token,
+            refresh_token_missing=not bool(refresh_token),
+        )
+    except Exception:
+        app.logger.warning("Google Drive connection failed", exc_info=True)
+        flash("Google Drive authorization failed. Check the callback URI and try again.", "error")
+        return redirect(url_for("admin_storage"))
+
+
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "QuickShare Cloud"}
@@ -290,6 +397,14 @@ def upload():
         flash("The selected file is too large. The maximum is 4 MB.", "error")
         return redirect(url_for("index"))
 
+    storage_provider = request.form.get("storage_provider", "github").strip().lower()
+    if storage_provider not in {"github", "google_drive"}:
+        flash("Choose a valid storage provider.", "error")
+        return redirect(url_for("index"))
+    if storage_provider == "google_drive" and not _drive_storage_ready():
+        flash("Google Drive storage is not configured yet. Ask the storage administrator to connect Drive in Settings → Storage.", "error")
+        return redirect(url_for("index"))
+
     user = _current_user()
     owner_id_hash = _current_owner_hash()
     if not user or not owner_id_hash:
@@ -303,6 +418,7 @@ def upload():
         "share_id": share_id,
         "original_filename": original_name,
         "storage_path": storage_path,
+        "storage_provider": storage_provider,
         "file_size": len(content),
         "upload_time": now.isoformat(timespec="seconds"),
         "expiry_time": (now + duration).isoformat(timespec="seconds"),
@@ -314,16 +430,41 @@ def upload():
         "cleanup_status": "pending",
     }
 
+    uploaded_file = None
     try:
-        upload_file_bytes(storage_path=storage_path, content=content, share_id=share_id)
+        uploaded_file = upload_file_bytes(
+            storage_provider=storage_provider,
+            storage_path=storage_path,
+            content=content,
+            share_id=share_id,
+        )
+        if storage_provider == "google_drive":
+            metadata["drive_file_id"] = uploaded_file.get("id", "")
         create_share_metadata(metadata)
-    except GitHubStorageError as exc:
-        app.logger.warning("GitHub upload failed: %s", exc)
-        flash(f"Upload to GitHub failed: {exc}", "error")
+    except StorageError as exc:
+        app.logger.warning("%s upload failed: %s", storage_provider, exc)
+        # Best-effort cleanup if the file uploaded but its metadata commit failed.
+        if uploaded_file:
+            try:
+                if storage_provider == "google_drive":
+                    google_drive_storage.delete_private_file(uploaded_file.get("id", ""))
+                else:
+                    delete_github_file(storage_path)
+            except StorageError:
+                app.logger.warning("Could not clean up an orphaned uploaded file %s", share_id)
+        flash(f"Upload to {('Google Drive' if storage_provider == 'google_drive' else 'GitHub')} failed: {exc}", "error")
         return redirect(url_for("index"))
     except Exception:
         app.logger.exception("Could not save share metadata")
-        flash("The file may have reached GitHub, but its metadata could not be saved. Check the storage repository before retrying.", "error")
+        if uploaded_file:
+            try:
+                if storage_provider == "google_drive":
+                    google_drive_storage.delete_private_file(uploaded_file.get("id", ""))
+                else:
+                    delete_github_file(storage_path)
+            except StorageError:
+                app.logger.warning("Could not clean up an orphaned uploaded file %s", share_id)
+        flash("The file may have reached storage, but its share metadata could not be saved. Check the storage backend before retrying.", "error")
         return redirect(url_for("index"))
 
     flash(f"File uploaded. Sharing link expires in {label}.", "success")
@@ -372,10 +513,10 @@ def download(share_id: str):
         return redirect(url_for("share_page", share_id=share_id, error=status))
 
     try:
-        content = download_public_file(file_record["storage_path"])
+        content = download_share_file(file_record)
         result = record_download(share_id)
-    except GitHubStorageError as exc:
-        app.logger.warning("GitHub download failed for share %s: %s", share_id, exc)
+    except StorageError as exc:
+        app.logger.warning("Storage download failed for share %s: %s", share_id, exc)
         return redirect(url_for("share_page", share_id=share_id, error="storage"))
 
     if result != "success":
@@ -409,7 +550,7 @@ def api_share(share_id: str):
 def api_my_shares():
     try:
         shares = list_user_shares(_current_owner_hash() or "")
-    except GitHubStorageError as exc:
+    except StorageError as exc:
         app.logger.warning("Could not list account shares: %s", exc)
         return jsonify({"error": "Share list is temporarily unavailable. Refresh in a moment."}), 503
     return jsonify({"shares": shares})
@@ -455,7 +596,7 @@ def api_cron_cleanup():
         return jsonify({"error": "Unauthorized"}), 401
     try:
         return jsonify({"ok": True, **cleanup_expired_files(max_items=20)})
-    except GitHubStorageError as exc:
+    except StorageError as exc:
         app.logger.warning("Scheduled cleanup failed: %s", exc)
         return jsonify({"error": str(exc)}), 503
 
@@ -471,13 +612,13 @@ def not_found(_error):
     return render_template("error.html", title="Share not found", message="This sharing link does not exist or is no longer available."), 404
 
 
-@app.errorhandler(GitHubStorageError)
-def github_storage_error(error):
-    app.logger.warning("GitHub storage service failed: %s", error)
+@app.errorhandler(StorageError)
+def storage_service_error(error):
+    app.logger.warning("Storage service failed: %s", error)
     return render_template(
         "error.html",
         title="Storage temporarily unavailable",
-        message="QuickShare could not read its GitHub storage metadata. Check the repository configuration and try again.",
+        message="QuickShare could not reach its configured storage backend. Check the storage configuration and try again.",
     ), 503
 
 
