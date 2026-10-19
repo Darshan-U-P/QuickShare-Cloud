@@ -160,3 +160,89 @@ def test_cleanup_endpoint_requires_bearer_secret(monkeypatch):
     client = app_module.app.test_client()
     response = client.get("/api/cron/cleanup")
     assert response.status_code == 401
+
+
+
+def test_storage_settings_page_is_admin_only(monkeypatch):
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "student@example.com")
+    monkeypatch.setattr(app_module.google_drive_storage, "is_configured", lambda: False)
+    client = app_module.app.test_client()
+    sign_in(client)
+    response = client.get("/admin/storage")
+    assert response.status_code == 200
+    assert b"Storage providers" in response.data
+    assert b"Google Drive" in response.data
+
+    other_client = app_module.app.test_client()
+    sign_in(other_client, sub="other-subject", email="other@example.com")
+    assert other_client.get("/admin/storage").status_code == 403
+
+
+def test_upload_can_select_google_drive_provider(monkeypatch):
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    client = app_module.app.test_client()
+    sign_in(client)
+    uploaded = []
+    saved_metadata = []
+
+    def fake_upload(**kwargs):
+        uploaded.append(kwargs)
+        return {"id": "drive-file-123"}
+
+    monkeypatch.setattr(app_module, "upload_file_bytes", fake_upload)
+    monkeypatch.setattr(app_module, "create_share_metadata", lambda metadata: saved_metadata.append(metadata))
+
+    response = client.post(
+        "/upload",
+        data={
+            "csrf_token": "csrf-test-token-which-is-long-enough",
+            "storage_provider": "google_drive",
+            "expiry": "24h",
+            "max_downloads": "3",
+            "file": (io.BytesIO(b"private bytes"), "report.txt"),
+        },
+        content_type="multipart/form-data",
+    )
+    assert response.status_code == 303
+    assert len(uploaded) == 1
+    assert uploaded[0]["storage_provider"] == "google_drive"
+    assert saved_metadata[0]["storage_provider"] == "google_drive"
+    assert saved_metadata[0]["drive_file_id"] == "drive-file-123"
+
+
+def test_upload_rejects_google_drive_when_not_configured(monkeypatch):
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: False)
+    client = app_module.app.test_client()
+    sign_in(client)
+    response = client.post(
+        "/upload",
+        data={
+            "csrf_token": "csrf-test-token-which-is-long-enough",
+            "storage_provider": "google_drive",
+            "file": (io.BytesIO(b"private bytes"), "report.txt"),
+        },
+        content_type="multipart/form-data",
+        follow_redirects=True,
+    )
+    assert response.status_code == 200
+    assert b"Google Drive storage is not configured" in response.data
+
+
+def test_download_dispatches_private_drive_share(monkeypatch):
+    share_id = "a" * 32
+    metadata = make_metadata(share_id)
+    metadata["storage_provider"] = "google_drive"
+    metadata["drive_file_id"] = "private-drive-file-id"
+    client = app_module.app.test_client()
+    monkeypatch.setattr(app_module, "get_share_metadata", lambda _sid: metadata)
+    downloaded_ids = []
+    monkeypatch.setattr(
+        app_module.google_drive_storage,
+        "download_private_file",
+        lambda file_id: downloaded_ids.append(file_id) or b"private file bytes",
+    )
+    monkeypatch.setattr(app_module, "record_download", lambda _sid: "success")
+    response = client.get(f"/download/{share_id}")
+    assert response.status_code == 200
+    assert response.data == b"private file bytes"
+    assert downloaded_ids == ["private-drive-file-id"]
