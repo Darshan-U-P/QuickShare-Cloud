@@ -241,6 +241,7 @@ def _transfer_download_url(file_record: dict) -> str:
         "file_id": str(file_record.get("drive_file_id", "")),
         "filename": str(file_record.get("original_filename", "download.bin"))[:200],
         "size": size,
+        "exp_at": int(datetime.now(timezone.utc).timestamp()) + TRANSFER_TICKET_MAX_AGE_SECONDS,
     }
     token = serializer.dumps(payload)
     return f"{base}/download/{token}"
