@@ -189,24 +189,6 @@
     return match ? Number(match[1]) + 1 : null;
   }
 
-  async function getDriveUploadStatus(sessionUrl, totalSize) {
-    const response = await fetch(sessionUrl, {
-      method: "PUT",
-      mode: "cors",
-      headers: { "Content-Range": "bytes */" + totalSize },
-      body: new Blob([])
-    });
-    if (response.status === 200 || response.status === 201) {
-      return { complete: true, file: await response.json() };
-    }
-    if (response.status === 308) {
-      return { complete: false, offset: offsetFromRange(response) ?? 0 };
-    }
-    throw new Error("Could not resume the Drive upload (HTTP " + response.status + ").");
-  }
-
-  const pause = (ms) => new Promise((resolve) => window.setTimeout(resolve, ms));
-
   async function uploadLargeDriveFile(file) {
     const metadata = {
       filename: file.name,
@@ -224,14 +206,12 @@
       body: JSON.stringify(metadata)
     });
     const init = await responseJson(initResponse);
-    const sessionUrl = init.upload_session_url;
     const uploadTicket = init.upload_ticket;
-    const chunkSize = Math.max(256 * 1024, Number(init.chunk_size) || 32 * 1024 * 1024);
-    if (!sessionUrl || !uploadTicket) throw new Error("The server did not return a resumable upload session.");
+    const chunkSize = Math.min(4 * 1024 * 1024, Math.max(256 * 1024, Number(init.chunk_size) || 4 * 1024 * 1024));
+    if (!uploadTicket) throw new Error("QuickShare did not return a secure upload ticket.");
 
     let offset = 0;
     let completedFile = null;
-    let attemptsWithoutProgress = 0;
     while (offset < file.size && !completedFile) {
       const chunkEnd = Math.min(offset + chunkSize, file.size);
       const chunk = file.slice(offset, chunkEnd);
@@ -239,75 +219,70 @@
       let lastError = null;
 
       for (let attempt = 0; attempt < 5 && !advanced; attempt++) {
+        let response;
         try {
-          const response = await fetch(sessionUrl, {
-            method: "PUT",
-            mode: "cors",
-            headers: { "Content-Range": "bytes " + offset + "-" + (chunkEnd - 1) + "/" + file.size },
+          // Browser sends only a <=4 MiB chunk to the same-origin Vercel endpoint.
+          // The server forwards those bytes to the Drive resumable session.
+          response = await fetch("/api/uploads/chunk", {
+            method: "POST",
+            credentials: "same-origin",
+            headers: {
+              "Content-Type": "application/octet-stream",
+              "X-CSRF-Token": csrfToken,
+              "X-Upload-Ticket": uploadTicket,
+              "Content-Range": "bytes " + offset + "-" + (chunkEnd - 1) + "/" + file.size
+            },
             body: chunk
           });
-          if (response.status === 200 || response.status === 201) {
-            completedFile = await response.json();
-            offset = file.size;
-            advanced = true;
-            updateUploadProgress(file.size, file.size, "Finishing upload…", "File bytes reached Google Drive. Verifying the completed file.");
-            break;
-          }
-          if (response.status === 308) {
-            const acknowledged = offsetFromRange(response);
-            const nextOffset = acknowledged === null ? chunkEnd : Math.min(chunkEnd, acknowledged);
-            if (nextOffset > offset) {
-              offset = nextOffset;
-              advanced = true;
-              attemptsWithoutProgress = 0;
-              updateUploadProgress(offset, file.size, "Uploading to Google Drive…", formatSize(offset) + " of " + formatSize(file.size) + " sent");
-              break;
-            }
-            throw new Error("Google Drive has not acknowledged this chunk yet.");
-          }
-          const text = await response.text().catch(() => "");
-          const error = new Error("Google Drive upload failed (HTTP " + response.status + ").");
-          if (response.status < 500 && response.status !== 408 && response.status !== 429) throw error;
-          lastError = error;
         } catch (error) {
-          lastError = error;
+          lastError = new Error("Network error while sending upload chunk to QuickShare. Retrying…");
+          if (attempt < 4) await pause(Math.min(8000, 600 * (2 ** attempt)));
+          continue;
         }
 
-        if (!advanced && attempt < 4) {
-          try {
-            const status = await getDriveUploadStatus(sessionUrl, file.size);
-            if (status.complete) {
-              completedFile = status.file;
-              offset = file.size;
-              advanced = true;
-              break;
-            }
-            if (status.offset > offset) {
-              offset = Math.min(chunkEnd, status.offset);
-              advanced = true;
-              updateUploadProgress(offset, file.size, "Resuming upload…", formatSize(offset) + " of " + formatSize(file.size) + " confirmed");
-              break;
-            }
-          } catch (statusError) {
-            lastError = statusError;
-          }
-          await pause(Math.min(8000, 600 * (2 ** attempt)));
+        const result = await response.json().catch(() => ({}));
+        if (!response.ok) {
+          const error = new Error(result.error || ("Chunk request failed (HTTP " + response.status + ")."));
+          if (response.status < 500 && response.status !== 408 && response.status !== 429) throw error;
+          lastError = error;
+          if (attempt < 4) await pause(Math.min(8000, 600 * (2 ** attempt)));
+          continue;
         }
+
+        if (result.complete === true && result.drive_file_id) {
+          completedFile = { id: result.drive_file_id };
+          offset = file.size;
+          advanced = true;
+          updateUploadProgress(file.size, file.size, "Finishing upload…", "All file bytes reached Google Drive. Verifying the completed file.");
+          break;
+        }
+
+        const nextOffset = Number(result.next_offset);
+        if (!Number.isFinite(nextOffset) || nextOffset < 0 || nextOffset > file.size) {
+          throw new Error("QuickShare received an invalid upload offset from Google Drive.");
+        }
+        if (nextOffset > offset) {
+          offset = nextOffset;
+          advanced = true;
+          updateUploadProgress(
+            offset,
+            file.size,
+            "Uploading to Google Drive…",
+            formatSize(offset) + " of " + formatSize(file.size) + " uploaded"
+          );
+          break;
+        }
+
+        lastError = new Error("Google Drive has not acknowledged new bytes yet. Retrying this chunk…");
+        if (attempt < 4) await pause(Math.min(8000, 600 * (2 ** attempt)));
       }
 
       if (!advanced && !completedFile) {
-        attemptsWithoutProgress += 1;
-        throw lastError || new Error("The upload could not resume. Keep this page open and try again.");
+        throw lastError || new Error("This chunk could not be uploaded. Check your connection and retry.");
       }
-      if (attemptsWithoutProgress > 2) throw new Error("The upload stopped making progress. Start again when your connection is stable.");
     }
 
-    if (!completedFile?.id) {
-      // Query the resumable session in case the last successful response was lost.
-      const status = await getDriveUploadStatus(sessionUrl, file.size);
-      if (!status.complete || !status.file?.id) throw new Error("Google Drive has not confirmed the completed file.");
-      completedFile = status.file;
-    }
+    if (!completedFile?.id) throw new Error("Google Drive did not confirm the completed file.");
     updateUploadProgress(file.size, file.size, "Registering your share link…", "Checking the stored file and saving the share metadata.");
     const finalizeResponse = await fetch("/api/uploads/finalize", {
       method: "POST",
