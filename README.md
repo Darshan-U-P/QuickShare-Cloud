@@ -5,7 +5,7 @@ A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hos
 ## Features
 
 - Google OpenID Connect sign-in; each account sees and manages only its own shares.
-- Resumable Google Drive uploads: 5 GB per file by default; accounts explicitly approved by the administrator may upload up to 50 GB per file.
+- Resumable Google Drive uploads: 5 GB per file by default; the storage administrator can grant/revoke 50 GB access in the Transfer Access admin panel.
 - File contents upload directly from the browser to Google Drive in resumable chunks, avoiding Vercel's request-body limit.
 - Large private downloads use 4 MiB byte ranges through Vercel and are written directly to the recipient's local file; no additional VPS is required.
 - Choose a file-storage provider per upload:
@@ -69,6 +69,11 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function request/response is bounded, but large transfers still use Vercel invocations and bandwidth.
 
 ## Large-file transfers (5 GB standard / 50 GB approved)
+
+### Managing 50 GB access
+
+Open `/admin/transfers` while signed in with the account configured as `STORAGE_ADMIN_EMAIL`. Add or revoke verified Google account email addresses. The approval list is persisted in a private JSON configuration file in the connected Google Drive folder, not in the public GitHub metadata repository. New upload sessions receive a signed server-side tier limit; the browser cannot grant itself the higher tier. The environment variable `LARGE_UPLOAD_ALLOWED_EMAILS` is no longer used.
+
 
 **No extra VPS is required.** The browser sends the file directly to Google Drive using a resumable upload session. Google Drive assembles the received ranges into one complete private file; QuickShare does not store separate packet files or run a server-side reassembly job.
 
