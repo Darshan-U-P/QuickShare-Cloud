@@ -167,7 +167,7 @@ def upload_file_bytes(storage_path: str, content: bytes, share_id: str) -> dict:
     folder_id = _ensure_folder()
     boundary = "quickshare_" + secrets.token_hex(16)
     metadata = {
-        "name": storage_path,
+        "name": f"QuickShare {storage_path.rsplit('/', 1)[-1]}",
         "mimeType": "application/octet-stream",
         "parents": [folder_id],
         "appProperties": {
