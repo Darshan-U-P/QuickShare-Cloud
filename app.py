@@ -89,6 +89,9 @@ DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
 DOWNLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
+# Only this verified Google account may use administrator functionality.
+# The configured STORAGE_ADMIN_EMAIL should use the same address.
+ADMIN_ALLOWED_EMAIL = "darshandileep4@gmail.com"
 ADMIN_PANEL_HOST = "adminqshare.darshanup.online"
 ADMIN_PANEL_BASE_URL = f"https://{ADMIN_PANEL_HOST}"
 TRANSFER_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -203,8 +206,17 @@ def _is_current_user_owner(metadata: dict) -> bool:
 
 def _is_storage_admin() -> bool:
     user = _current_user()
-    admin_email = os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower()
-    return bool(user and admin_email and user.get("email", "").strip().lower() == admin_email)
+    email = str(user.get("email", "")).strip().lower() if user else ""
+    return bool(user and email == ADMIN_ALLOWED_EMAIL)
+
+
+def _not_admin_response():
+    user = _current_user() or {}
+    return render_template(
+        "not_admin.html",
+        account_email=str(user.get("email", "")).strip(),
+        allowed_admin_email=ADMIN_ALLOWED_EMAIL,
+    ), 403
 
 
 def _is_admin_host_request() -> bool:
@@ -479,7 +491,7 @@ def my_shares():
 def admin_storage():
     _require_admin_host()
     if not _is_storage_admin():
-        abort(403)
+        return _not_admin_response()
     redirect_uri = os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True)
     return render_template(
         "drive_setup.html",
@@ -587,8 +599,10 @@ def connect_google_drive():
 
 @app.get("/auth/google-drive/callback")
 def google_drive_callback():
-    if not _is_storage_admin() or not session.pop("drive_connect_pending", False):
+    if not session.pop("drive_connect_pending", False):
         abort(403)
+    if not _is_storage_admin():
+        return _not_admin_response()
     try:
         token = oauth.google_drive.authorize_access_token()
         userinfo = token.get("userinfo")
@@ -596,8 +610,12 @@ def google_drive_callback():
             userinfo = oauth.google_drive.userinfo(token=token)
         email = str(userinfo.get("email", "")).strip().lower()
         if userinfo.get("email_verified") is not True or email != os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower():
-            flash("Connect Drive using the Google account configured as STORAGE_ADMIN_EMAIL.", "error")
-            return redirect(url_for("admin_storage"))
+            flash(
+                f"Connect Drive using the authorized admin account {ADMIN_ALLOWED_EMAIL}. "
+                "Ensure STORAGE_ADMIN_EMAIL is set to the same address in Vercel.",
+                "error",
+            )
+            return redirect(f"{ADMIN_PANEL_BASE_URL}/admin/storage")
         refresh_token = str(token.get("refresh_token") or "").strip()
         return render_template(
             "drive_setup.html",
