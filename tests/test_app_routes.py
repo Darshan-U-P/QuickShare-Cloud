@@ -646,3 +646,42 @@ def test_transfer_permissions_admin_panel_shows_private_store_error(monkeypatch)
     assert response.status_code == 200
     assert b"Permissions could not be loaded" in response.data
     assert b"Drive permission file unavailable" in response.data
+
+
+
+def test_admin_subdomain_root_opens_transfer_permissions():
+    client = app_module.app.test_client()
+    response = client.get("/", base_url="https://adminqshare.darshanup.online")
+    assert response.status_code == 302
+    assert response.headers["Location"].endswith("/admin/transfers")
+
+
+def test_admin_panel_is_hidden_on_public_quickshare_host(monkeypatch):
+    client = app_module.app.test_client()
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    with client.session_transaction(base_url="https://qshare.darshanup.online") as saved:
+        saved["user"] = {
+            "sub": "admin-subject",
+            "email": "admin@example.com",
+            "name": "Admin",
+        }
+        saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
+    response = client.get("/admin/transfers", base_url="https://qshare.darshanup.online")
+    assert response.status_code == 404
+
+
+def test_admin_subdomain_accepts_storage_admin_session(monkeypatch):
+    client = app_module.app.test_client()
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
+    monkeypatch.setattr(app_module.google_drive_storage, "get_large_upload_allowlist", lambda: [])
+    with client.session_transaction(base_url="https://adminqshare.darshanup.online") as saved:
+        saved["user"] = {
+            "sub": "admin-subject",
+            "email": "admin@example.com",
+            "name": "Admin",
+        }
+        saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
+    response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
+    assert response.status_code == 200
+    assert b"Large transfer" in response.data

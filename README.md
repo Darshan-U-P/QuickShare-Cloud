@@ -68,6 +68,18 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 
 Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function request/response is bounded, but large transfers still use Vercel invocations and bandwidth.
 
+## Administrator panel (private subdomain)
+
+Administrator tools are intentionally omitted from the normal QuickShare navigation. They are available at [`https://adminqshare.darshanup.online`](https://adminqshare.darshanup.online), which opens the large-transfer permissions panel. Storage settings and transfer approvals are restricted to this host and to the signed-in account matching `STORAGE_ADMIN_EMAIL`.
+
+To activate this host:
+
+1. In Vercel, open the QuickShare Cloud project → **Settings → Domains** and add `adminqshare.darshanup.online`.
+2. Follow the exact DNS record Vercel displays and add it at the DNS provider for `darshanup.online`. Wait for Vercel to verify the domain and provision HTTPS.
+3. Keep the existing Google OAuth callback URI at `https://qshare.darshanup.online/auth/google/callback`. Production Flask sessions are shared across the two `darshanup.online` subdomains so the normal sign-in callback and admin host can use the same session.
+
+The subdomain is not a replacement for authentication: the admin routes also require a signed-in Google account whose verified email matches `STORAGE_ADMIN_EMAIL`. The domain is not active until Vercel and DNS are configured.
+
 ## Large-file transfers (5 GB standard / 50 GB approved)
 
 ### Managing 50 GB access
