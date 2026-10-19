@@ -10,7 +10,7 @@ def test_cleanup_retry_backoff_is_exponential_and_bounded():
     assert retry_delay_seconds(20) == 3600
 
 
-def test_expiry_lifecycle_and_shared-reference_protection_are_explicit():
+def test_expiry_lifecycle_and_shared_reference_protection_are_explicit():
     root = Path(__file__).resolve().parent.parent
     schema = (root / "migrations" / "001_initial_schema.sql").read_text(encoding="utf-8")
     worker = (root / "services" / "database_cleanup.py").read_text(encoding="utf-8")

@@ -348,7 +348,7 @@ The current GitHub-backed production cleanup remains enabled during this first p
 
 7. Inspect row counts, expiry candidates, public share IDs and storage references before any production cutover.
 
-The importer preserves existing public share IDs and maps legacy owner hashes into private user rows. Legacy records do not contain the original Google subject or account email, so those fields remain empty until the account signs in after a later cutover. The importer is resumable/idempotent and does not delete stored files.
+The importer preserves existing public share IDs and maps legacy owner hashes into private user rows. It also synchronizes the approved 50 GB email list from the connected private Google Drive configuration into PostgreSQL, including revoking database rows for accounts no longer approved in Drive. Legacy records do not contain the original Google subject or account email, so those fields remain empty until the account signs in after a later cutover. The importer is resumable/idempotent and does not delete stored files. A failed Drive permission import is reported as an error; reconnect Drive and rerun the importer to retry safely.
 
 **Do not switch public share reads or activate PostgreSQL cleanup yet.** The running app has not been switched to PostgreSQL in this phase. The existing GitHub repository remains the source of truth until a separately tested cutover is implemented. This staged approach avoids losing uploads made while the migration is being prepared.
 
