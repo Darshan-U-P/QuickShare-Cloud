@@ -636,7 +636,7 @@ def test_transfer_permissions_admin_panel_rejects_non_admin(monkeypatch):
 
 def test_transfer_permissions_admin_panel_shows_private_store_error(monkeypatch):
     client = app_module.app.test_client()
-    sign_in(client, sub="storage-admin-sub", email="admin@example.com")
+    sign_in(client, sub="storage-admin-sub", email="admin@example.com", base_url="https://adminqshare.darshanup.online")
     monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
 
