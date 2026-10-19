@@ -209,8 +209,8 @@ def _large_upload_allowed() -> bool:
 
 
 def _large_transfer_ready() -> bool:
-    # Large-file data moves in bounded 4 MiB ranges through this Vercel app;
-    # uploads go directly from the browser to Drive's resumable-upload session.
+    # Large-file data moves in bounded 4 MiB chunks through Vercel and Drive's
+    # resumable session; the browser never calls Google's upload host directly.
     return _drive_storage_ready()
 
 
