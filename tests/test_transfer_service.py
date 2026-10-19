@@ -58,7 +58,7 @@ def test_large_download_streams_and_ticket_cannot_be_replayed(transfer_test_setu
         lambda file_id, range_header="": upstream,
     )
 
-    response = client.get("/download/" + ticket(serializer))
+    response = client.get("/download/" + ticket(serializer), base_url="https://transfer.test")
     assert response.status_code == 200
     assert response.data == b"test-file"
     assert response.headers["Accept-Ranges"] == "bytes"
@@ -66,8 +66,8 @@ def test_large_download_streams_and_ticket_cannot_be_replayed(transfer_test_setu
     assert upstream.closed is True
 
     # A fresh ticket is allowed; replaying the completed ticket is not.
-    new_download = client.get("/download/" + ticket(serializer, "c" * 32))
-    replay_same = client.get(response.request.path)
+    new_download = client.get("/download/" + ticket(serializer, "c" * 32), base_url="https://transfer.test")
+    replay_same = client.get(response.request.path, base_url="https://transfer.test")
     assert new_download.status_code == 200
     assert new_download.data == b"test-file"
     assert replay_same.status_code == 410
@@ -94,6 +94,7 @@ def test_range_download_returns_partial_content(transfer_test_setup, monkeypatch
     response = client.get(
         "/download/" + ticket(serializer),
         headers={"Range": "bytes=3-5"},
+        base_url="https://transfer.test",
     )
     assert response.status_code == 206
     assert response.data == b"t-f"
