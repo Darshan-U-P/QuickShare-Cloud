@@ -719,3 +719,190 @@ input[type="password"]::placeholder { color: #7182a3; }
     font-size: 9px;
   }
 }
+
+
+/* Selectable storage providers and Drive administrator setup */
+.storage-provider-field {
+  margin-top: 17px;
+}
+.storage-provider-field .select-wrap select {
+  padding-left: 39px;
+}
+.storage-provider-help {
+  margin: 8px 0 0;
+  color: #e6c58b;
+  font-size: 10px;
+  line-height: 1.65;
+}
+.storage-provider-help.storage-help-private {
+  color: #8bead7;
+}
+.storage-setup-link {
+  display: inline-block;
+  margin-top: 7px;
+  color: #9bb0ff;
+  font-size: 10px;
+  font-weight: 750;
+  text-decoration: none;
+}
+.storage-setup-link:hover {
+  color: #c3d0ff;
+  text-decoration: underline;
+}
+.storage-settings-page .dashboard-heading {
+  align-items: center;
+}
+.storage-provider-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 15px;
+  margin: 21px 0;
+}
+.storage-provider-card {
+  min-width: 0;
+  padding: 24px;
+}
+.storage-provider-icon {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 18px;
+  border-radius: 13px;
+  font-family: Arial, sans-serif;
+  font-weight: 900;
+  font-size: 15px;
+}
+.storage-icon-github {
+  color: #dce5ff;
+  background: #202d49;
+}
+.storage-icon-drive {
+  color: #4285f4;
+  background: #fff;
+  font-size: 24px;
+}
+.storage-provider-card h2 {
+  margin: 8px 0 11px;
+  font-size: 22px;
+  letter-spacing: -.7px;
+}
+.storage-provider-card > p {
+  margin: 13px 0;
+  color: #97a8c8;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.storage-provider-card ul {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding-left: 17px;
+  color: #b8c5df;
+  font-size: 10px;
+  line-height: 1.7;
+}
+.storage-connect-button {
+  margin-top: 13px;
+}
+.storage-connected-note {
+  padding: 10px 12px;
+  border: 1px solid rgba(121,234,215,.15);
+  border-radius: 9px;
+  background: rgba(121,234,215,.05);
+  overflow-wrap: anywhere;
+}
+.storage-setup-instructions,
+.drive-token-card {
+  padding: clamp(19px, 3vw, 28px);
+  margin-top: 15px;
+}
+.storage-setup-instructions h2,
+.drive-token-card h2 {
+  margin: 8px 0 13px;
+  font-size: 21px;
+  letter-spacing: -.6px;
+}
+.storage-setup-instructions ol {
+  display: grid;
+  gap: 12px;
+  padding-left: 22px;
+  color: #aab9d4;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.storage-setup-instructions li a {
+  color: #a8baff;
+  text-decoration: underline;
+}
+.storage-setup-instructions code,
+.drive-token-card code {
+  color: #b3c2ff;
+  overflow-wrap: anywhere;
+}
+.storage-callback-row {
+  margin: 8px 0 16px;
+}
+.storage-callback-row input {
+  min-width: 0;
+}
+.storage-warning {
+  margin-top: 21px;
+  padding: 15px;
+  border: 1px solid rgba(243,214,155,.2);
+  border-radius: 12px;
+  background: rgba(95,65,21,.15);
+}
+.storage-warning strong {
+  color: #f1d29a;
+  font-size: 11px;
+}
+.storage-warning p {
+  margin: 6px 0 0;
+  color: #c7b58f;
+  font-size: 10px;
+  line-height: 1.8;
+}
+.drive-token-card > p {
+  color: #9daecc;
+  font-size: 11px;
+  line-height: 1.8;
+}
+.drive-token-card textarea {
+  width: 100%;
+  margin: 12px 0;
+  padding: 13px;
+  border: 1px solid rgba(146,169,216,.2);
+  border-radius: 10px;
+  color: #b9c8ff;
+  background: #080f1d;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+  line-height: 1.65;
+  overflow-wrap: anywhere;
+  resize: vertical;
+}
+.drive-token-card .file-actions {
+  justify-content: flex-start;
+}
+@media (max-width: 700px) {
+  .storage-provider-cards {
+    grid-template-columns: 1fr;
+  }
+  .storage-provider-card {
+    padding: 20px;
+  }
+  .storage-callback-row {
+    align-items: stretch;
+    flex-direction: column;
+  }
+  .storage-callback-row .btn {
+    width: 100%;
+  }
+  .storage-settings-page .dashboard-heading {
+    align-items: flex-start;
+  }
+  .drive-token-card .file-actions .btn {
+    flex: 1 1 100%;
+  }
+}
