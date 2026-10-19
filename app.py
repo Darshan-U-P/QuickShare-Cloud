@@ -46,6 +46,10 @@ app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "local-development-only-chang
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_SECURE"] = os.getenv("VERCEL", "") == "1"
+_session_cookie_domain = os.getenv("SESSION_COOKIE_DOMAIN", "").strip()
+if not _session_cookie_domain and os.getenv("VERCEL_ENV", "").strip().lower() == "production":
+    _session_cookie_domain = ".darshanup.online"
+app.config["SESSION_COOKIE_DOMAIN"] = _session_cookie_domain or None
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 # Vercel Function request and response payloads are limited to 4.5 MB; cap uploads at 4 MiB.
 app.config["MAX_CONTENT_LENGTH"] = max(1, min(4, int(os.getenv("MAX_CONTENT_LENGTH_MB", "4")))) * 1024 * 1024
@@ -85,6 +89,8 @@ DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
 DOWNLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
+ADMIN_PANEL_HOST = "adminqshare.darshanup.online"
+ADMIN_PANEL_BASE_URL = f"https://{ADMIN_PANEL_HOST}"
 TRANSFER_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _LARGE_UPLOAD_ALLOWLIST_CACHE = {"emails": frozenset(), "expires_at": 0.0}
 _LARGE_UPLOAD_ALLOWLIST_LOCK = Lock()
@@ -199,6 +205,19 @@ def _is_storage_admin() -> bool:
     user = _current_user()
     admin_email = os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower()
     return bool(user and admin_email and user.get("email", "").strip().lower() == admin_email)
+
+
+def _is_admin_host_request() -> bool:
+    host = (request.host or "").split(":", 1)[0].rstrip(".").lower()
+    if host == ADMIN_PANEL_HOST:
+        return True
+    # Keep the admin UI testable in local Flask tests and local development.
+    return bool(app.testing and host in {"localhost", "127.0.0.1", "testserver"})
+
+
+def _require_admin_host() -> None:
+    if not _is_admin_host_request():
+        abort(404)
 
 
 def _get_large_upload_allowlist(*, force_refresh: bool = False) -> set[str]:
@@ -381,6 +400,8 @@ def add_security_headers(response):
 
 @app.get("/")
 def index():
+    if _is_admin_host_request():
+        return redirect(url_for("admin_transfer_permissions"))
     return render_template("index.html", storage_repo=os.getenv("GITHUB_REPO", "QuickShare-Storage"))
 
 
@@ -393,6 +414,9 @@ def login():
         return redirect(url_for("index"))
     next_url = _safe_next_url(request.args.get("next"))
     session["after_login"] = next_url or url_for("my_shares")
+    session["after_login_admin_host"] = bool(
+        _is_admin_host_request() and next_url and next_url.startswith("/admin/")
+    )
     redirect_uri = os.getenv("GOOGLE_REDIRECT_URI", "").strip() or url_for("google_callback", _external=True)
     return oauth.google.authorize_redirect(redirect_uri, prompt="select_account")
 
@@ -414,6 +438,7 @@ def google_callback():
             flash("Google did not return a verified email address. Please try a verified Google account.", "error")
             return redirect(url_for("index"))
         next_url = _safe_next_url(session.get("after_login")) or url_for("my_shares")
+        return_to_admin_host = session.get("after_login_admin_host") is True and next_url.startswith("/admin/")
         user = {
             "sub": subject,
             "email": email,
@@ -424,6 +449,8 @@ def google_callback():
         session.clear()
         session["user"] = user
         flash(f"Signed in as {email}.", "success")
+        if return_to_admin_host:
+            return redirect(f"{ADMIN_PANEL_BASE_URL}{next_url}")
         return redirect(next_url)
     except Exception:
         app.logger.warning("Google sign-in failed", exc_info=True)
@@ -447,6 +474,7 @@ def my_shares():
 @app.get("/admin/storage")
 @login_required
 def admin_storage():
+    _require_admin_host()
     if not _is_storage_admin():
         abort(403)
     redirect_uri = os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True)
@@ -461,6 +489,7 @@ def admin_storage():
 @app.get("/admin/transfers")
 @login_required
 def admin_transfer_permissions():
+    _require_admin_host()
     if not _is_storage_admin():
         abort(403)
     drive_ready = _drive_storage_ready()
@@ -485,6 +514,7 @@ def admin_transfer_permissions():
 @app.post("/admin/transfers/add")
 @login_required
 def admin_add_transfer_permission():
+    _require_admin_host()
     if not _is_storage_admin():
         abort(403)
     email = str(request.form.get("email", "")).strip().lower()
@@ -510,6 +540,7 @@ def admin_add_transfer_permission():
 @app.post("/admin/transfers/remove")
 @login_required
 def admin_remove_transfer_permission():
+    _require_admin_host()
     if not _is_storage_admin():
         abort(403)
     email = str(request.form.get("email", "")).strip().lower()
@@ -535,6 +566,7 @@ def admin_remove_transfer_permission():
 @app.get("/admin/storage/google-drive/connect")
 @login_required
 def connect_google_drive():
+    _require_admin_host()
     if not _is_storage_admin():
         abort(403)
     if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
