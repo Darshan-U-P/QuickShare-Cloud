@@ -584,7 +584,7 @@ def api_upload_chunk():
         return jsonify({"error": "This account is not permitted to upload a file of this size."}), 413
 
     content_range = request.headers.get("Content-Range", "").strip()
-    match = re.fullmatch(r"bytes (\\d+)-(\\d+)/(\\d+)", content_range)
+    match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
     if not match:
         return jsonify({"error": "The upload chunk is missing a valid Content-Range header."}), 400
     start, end, total = map(int, match.groups())
