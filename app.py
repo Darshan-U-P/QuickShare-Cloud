@@ -506,7 +506,7 @@ def admin_storage():
 def admin_transfer_permissions():
     _require_admin_host()
     if not _is_storage_admin():
-        abort(403)
+        return _not_admin_response()
     drive_ready = _drive_storage_ready()
     approved_emails = []
     permission_error = ""
@@ -531,7 +531,7 @@ def admin_transfer_permissions():
 def admin_add_transfer_permission():
     _require_admin_host()
     if not _is_storage_admin():
-        abort(403)
+        return _not_admin_response()
     email = str(request.form.get("email", "")).strip().lower()
     if not email or len(email) > 254 or not TRANSFER_EMAIL_PATTERN.fullmatch(email):
         flash("Enter a valid email address for the Google account to approve.", "error")
@@ -557,7 +557,7 @@ def admin_add_transfer_permission():
 def admin_remove_transfer_permission():
     _require_admin_host()
     if not _is_storage_admin():
-        abort(403)
+        return _not_admin_response()
     email = str(request.form.get("email", "")).strip().lower()
     if not email or len(email) > 254 or not TRANSFER_EMAIL_PATTERN.fullmatch(email):
         flash("The selected email address is invalid.", "error")
@@ -583,7 +583,7 @@ def admin_remove_transfer_permission():
 def connect_google_drive():
     _require_admin_host()
     if not _is_storage_admin():
-        abort(403)
+        return _not_admin_response()
     if not os.getenv("GOOGLE_CLIENT_ID") or not os.getenv("GOOGLE_CLIENT_SECRET"):
         flash("Google OAuth client credentials must be configured first.", "error")
         return redirect(url_for("admin_storage"))
