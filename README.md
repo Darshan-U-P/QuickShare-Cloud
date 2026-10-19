@@ -7,7 +7,7 @@ A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hos
 - Google OpenID Connect sign-in; each account sees and manages only its own shares.
 - Resumable Google Drive uploads: 5 GB per file by default; accounts explicitly approved by the administrator may upload up to 50 GB per file.
 - File contents upload directly from the browser to Google Drive in resumable chunks, avoiding Vercel's request-body limit.
-- A separate VPS streaming service handles large private downloads and byte-range resume; Vercel stays the web/control plane.
+- Large private downloads use 4 MiB byte ranges through Vercel and are written directly to the recipient's local file; no additional VPS is required.
 - Choose a file-storage provider per upload:
   - **Google Drive**: once the administrator connects one Drive account, this becomes the default central storage for every user's uploads; file contents stay private in that account.
   - **GitHub**: retained as an alternative; file contents are public.
@@ -64,7 +64,7 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 - **Both options:** metadata is currently stored in the public GitHub repository. Metadata includes file name, file size, timing, download counts, activity summaries, provider, and a keyed owner hash. Do not use sensitive filenames.
 - Cleanup deletes a GitHub file from the latest branch revision (historical Git content may remain) or deletes the file from Google Drive, depending on provider.
 - This prototype uses GitHub Contents API as a metadata store and optimistic SHA updates; it is not a transactional database, so high-concurrency guarantees are limited.
-- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel only authorizes the upload and creates a resumable session; the browser sends the file bytes directly to Google's upload endpoint. Large downloads are streamed by `transfer_service.py` on a persistent VPS because the Vercel function body and execution limits make it unsuitable as a 5–50 GB data plane.
+- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel authorizes the upload and creates a resumable session; the browser sends the file bytes directly to Google's upload endpoint. Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function response stays below Vercel's 4.5 MB response-body limit.
 
 ## Large-file transfers (5 GB standard / 50 GB approved)
 
