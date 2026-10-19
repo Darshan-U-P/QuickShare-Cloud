@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Download {{ file.original_filename }} · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="share-page large-download-page">
+  <a class="back-link" href="{{ url_for('share_page', share_id=file.share_id) }}">← Back to share</a>
+  <div class="share-head">
+    <div>
+      <div class="section-kicker">PRIVATE LARGE-FILE DOWNLOAD</div>
+      <h1>Save your <span>file.</span></h1>
+      <p>The file will be downloaded in small verified ranges and written directly to the destination you choose. No temporary packet files are created in your downloads folder.</p>
+    </div>
+    <span class="status-pill status-active"><i></i> Link active</span>
+  </div>
+
+  <section class="card large-download-card">
+    <div class="file-card-top">
+      <span class="large-file-icon" aria-hidden="true">⇩</span>
+      <div class="file-heading">
+        <span class="section-kicker">GOOGLE DRIVE · PRIVATE</span>
+        <h2 id="large-download-filename">{{ file.original_filename }}</h2>
+        <p>{{ "%.2f"|format(file.file_size / (1024 ** 3)) }} GB · Stored as one complete file · Link expires according to the owner's settings</p>
+      </div>
+    </div>
+    <div class="large-download-progress" id="large-download-progress" hidden aria-live="polite">
+      <div class="upload-progress-heading"><strong id="large-download-status">Preparing download…</strong><span id="large-download-percent">0%</span></div>
+      <div class="upload-progress-track"><span id="large-download-bar"></span></div>
+      <p id="large-download-detail">Preparing the first range.</p>
+    </div>
+    <div class="large-download-actions">
+      <button class="btn btn-primary" type="button" id="start-large-download"
+        data-share-id="{{ file.share_id }}"
+        data-file-size="{{ file.file_size }}"
+        data-file-name="{{ file.original_filename }}"
+        data-chunk-size="{{ chunk_size }}">
+        <span aria-hidden="true">↓</span> Save file to your device
+      </button>
+      <a class="btn btn-secondary" href="{{ url_for('share_page', share_id=file.share_id) }}">Back to share page</a>
+    </div>
+    <div class="large-download-note">
+      <span class="privacy-icon" aria-hidden="true">i</span>
+      <div>
+        <strong>Designed for large downloads</strong>
+        <p>For 5–50 GB files, use a recent desktop version of Microsoft Edge or Google Chrome. The browser asks where to save the file, then writes each downloaded range to disk instead of holding the entire file in memory.</p>
+        <p>To work without a VPS, QuickShare requests 4 MiB ranges through Vercel. Very large downloads therefore use many requests and may take longer or consume your Vercel usage allowance.</p>
+      </div>
+    </div>
+  </section>
+</section>
+{% endblock %}
