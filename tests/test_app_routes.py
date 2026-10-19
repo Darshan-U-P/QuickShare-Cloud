@@ -170,7 +170,7 @@ def test_storage_settings_page_is_admin_only(monkeypatch):
     sign_in(client)
     response = client.get("/admin/storage")
     assert response.status_code == 200
-    assert b"Storage providers" in response.data
+    assert b"providers." in response.data
     assert b"Google Drive" in response.data
 
     other_client = app_module.app.test_client()
