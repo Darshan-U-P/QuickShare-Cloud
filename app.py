@@ -4,6 +4,8 @@ import mimetypes
 import os
 import re
 import secrets
+import time
+from threading import Lock
 from datetime import datetime, timedelta, timezone
 from functools import wraps
 from io import BytesIO
@@ -83,6 +85,10 @@ DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
 DOWNLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
+TRANSFER_EMAIL_PATTERN = re.compile(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$")
+_LARGE_UPLOAD_ALLOWLIST_CACHE = {"emails": frozenset(), "expires_at": 0.0}
+_LARGE_UPLOAD_ALLOWLIST_LOCK = Lock()
+LARGE_UPLOAD_ALLOWLIST_CACHE_SECONDS = 15
 EXTENSION_PATTERN = re.compile(r"^\.[a-zA-Z0-9]{1,10}$")
 BLOCKED_EXTENSIONS = {
     ".exe", ".dll", ".sys", ".bat", ".cmd", ".ps1", ".sh", ".msi",
@@ -195,17 +201,50 @@ def _is_storage_admin() -> bool:
     return bool(user and admin_email and user.get("email", "").strip().lower() == admin_email)
 
 
+def _get_large_upload_allowlist(*, force_refresh: bool = False) -> set[str]:
+    """Read approved accounts from a private Drive config, failing closed on errors."""
+    now = time.monotonic()
+    if not force_refresh and now < _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"]:
+        return set(_LARGE_UPLOAD_ALLOWLIST_CACHE["emails"])
+
+    with _LARGE_UPLOAD_ALLOWLIST_LOCK:
+        now = time.monotonic()
+        if not force_refresh and now < _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"]:
+            return set(_LARGE_UPLOAD_ALLOWLIST_CACHE["emails"])
+        try:
+            if not _drive_storage_ready():
+                emails = set()
+            else:
+                emails = {
+                    email.strip().lower()
+                    for email in google_drive_storage.get_large_upload_allowlist()
+                    if isinstance(email, str) and email.strip()
+                }
+            _LARGE_UPLOAD_ALLOWLIST_CACHE["emails"] = frozenset(emails)
+            _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"] = now + LARGE_UPLOAD_ALLOWLIST_CACHE_SECONDS
+            return set(emails)
+        except StorageError:
+            app.logger.warning("Could not read the private 50 GB permission list; failing closed.", exc_info=True)
+            _LARGE_UPLOAD_ALLOWLIST_CACHE["emails"] = frozenset()
+            _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"] = now + 3
+            return set()
+
+
+def _save_large_upload_allowlist(emails: list[str]) -> list[str]:
+    saved = google_drive_storage.set_large_upload_allowlist(emails)
+    normalized = {email.strip().lower() for email in saved if isinstance(email, str) and email.strip()}
+    with _LARGE_UPLOAD_ALLOWLIST_LOCK:
+        _LARGE_UPLOAD_ALLOWLIST_CACHE["emails"] = frozenset(normalized)
+        _LARGE_UPLOAD_ALLOWLIST_CACHE["expires_at"] = time.monotonic() + LARGE_UPLOAD_ALLOWLIST_CACHE_SECONDS
+    return sorted(normalized)
+
+
 def _large_upload_allowed() -> bool:
     user = _current_user()
     if not user:
         return False
-    allowed = {
-        item.strip().lower()
-        for item in os.getenv("LARGE_UPLOAD_ALLOWED_EMAILS", "").split(",")
-        if item.strip()
-    }
     email = str(user.get("email", "")).strip().lower()
-    return bool(email and email in allowed)
+    return bool(email and email in _get_large_upload_allowlist())
 
 
 def _large_transfer_ready() -> bool:
@@ -417,6 +456,80 @@ def admin_storage():
     )
 
 
+@app.get("/admin/transfers")
+@login_required
+def admin_transfer_permissions():
+    if not _is_storage_admin():
+        abort(403)
+    drive_ready = _drive_storage_ready()
+    approved_emails = []
+    permission_error = ""
+    if drive_ready:
+        try:
+            approved_emails = sorted(_get_large_upload_allowlist(force_refresh=True))
+        except StorageError as exc:
+            permission_error = str(exc)
+    else:
+        permission_error = "Connect Google Drive before managing transfer permissions."
+    return render_template(
+        "transfer_permissions.html",
+        approved_emails=approved_emails,
+        drive_storage_ready=drive_ready,
+        storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
+        permission_error=permission_error,
+    )
+
+
+@app.post("/admin/transfers/add")
+@login_required
+def admin_add_transfer_permission():
+    if not _is_storage_admin():
+        abort(403)
+    email = str(request.form.get("email", "")).strip().lower()
+    if not email or len(email) > 254 or not TRANSFER_EMAIL_PATTERN.fullmatch(email):
+        flash("Enter a valid email address for the Google account to approve.", "error")
+        return redirect(url_for("admin_transfer_permissions"))
+    if not _drive_storage_ready():
+        flash("Connect Google Drive before changing transfer permissions.", "error")
+        return redirect(url_for("admin_transfer_permissions"))
+    try:
+        emails = _get_large_upload_allowlist(force_refresh=True)
+        if email in emails:
+            flash(f"{email} already has 50 GB transfer permission.", "info")
+        else:
+            emails.add(email)
+            _save_large_upload_allowlist(sorted(emails))
+            flash(f"Approved {email} for uploads up to 50 GB per file.", "success")
+    except StorageError as exc:
+        flash(f"Could not update transfer permissions: {exc}", "error")
+    return redirect(url_for("admin_transfer_permissions"))
+
+
+@app.post("/admin/transfers/remove")
+@login_required
+def admin_remove_transfer_permission():
+    if not _is_storage_admin():
+        abort(403)
+    email = str(request.form.get("email", "")).strip().lower()
+    if not email or len(email) > 254 or not TRANSFER_EMAIL_PATTERN.fullmatch(email):
+        flash("The selected email address is invalid.", "error")
+        return redirect(url_for("admin_transfer_permissions"))
+    if not _drive_storage_ready():
+        flash("Connect Google Drive before changing transfer permissions.", "error")
+        return redirect(url_for("admin_transfer_permissions"))
+    try:
+        emails = _get_large_upload_allowlist(force_refresh=True)
+        if email not in emails:
+            flash(f"{email} does not currently have 50 GB transfer permission.", "info")
+        else:
+            emails.remove(email)
+            _save_large_upload_allowlist(sorted(emails))
+            flash(f"Revoked 50 GB transfer permission for {email}. New uploads are limited to 5 GB.", "success")
+    except StorageError as exc:
+        flash(f"Could not update transfer permissions: {exc}", "error")
+    return redirect(url_for("admin_transfer_permissions"))
+
+
 @app.get("/admin/storage/google-drive/connect")
 @login_required
 def connect_google_drive():
@@ -542,6 +655,7 @@ def api_upload_initiate():
         "metadata": metadata,
         "upload_nonce": upload_nonce,
         "session_uri": session_uri,
+        "max_upload_bytes": limit_bytes,
     }
     upload_ticket = _upload_ticket_serializer().dumps(upload_ticket_data)
     return jsonify({
@@ -579,9 +693,14 @@ def api_upload_chunk():
     current_owner_hash = _current_owner_hash()
     if not current_owner_hash or not hmac.compare_digest(current_owner_hash, expected_owner_hash):
         return jsonify({"error": "This upload belongs to another signed-in account."}), 403
-    max_allowed = MAX_APPROVED_UPLOAD_BYTES if _large_upload_allowed() else MAX_STANDARD_UPLOAD_BYTES
-    if file_size <= 0 or file_size > max_allowed:
-        return jsonify({"error": "This account is not permitted to upload a file of this size."}), 413
+    try:
+        ticket_max_bytes = int(ticket_data.get("max_upload_bytes", MAX_STANDARD_UPLOAD_BYTES))
+    except (TypeError, ValueError):
+        return jsonify({"error": "This upload ticket has an invalid permission tier."}), 400
+    if ticket_max_bytes not in (MAX_STANDARD_UPLOAD_BYTES, MAX_APPROVED_UPLOAD_BYTES):
+        return jsonify({"error": "This upload ticket has an invalid permission tier."}), 400
+    if file_size <= 0 or file_size > ticket_max_bytes:
+        return jsonify({"error": "This upload ticket does not permit a file of this size."}), 413
 
     content_range = request.headers.get("Content-Range", "").strip()
     match = re.fullmatch(r"bytes (\d+)-(\d+)/(\d+)", content_range)
