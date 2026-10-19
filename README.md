@@ -68,28 +68,23 @@ The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRE
 
 ## Large-file transfers (5 GB standard / 50 GB approved)
 
-Large transfers need a persistent download host in addition to the Vercel web app. The repo includes `transfer_service.py`, which streams private Drive files without buffering the whole file in RAM and supports HTTP byte-range requests. Deploy it on the existing VPS before enabling uploads above 4 MiB; otherwise the app will reject large-file upload initiation rather than create shares that cannot be downloaded.
+**No extra VPS is required.** The browser sends the file directly to Google Drive using a resumable upload session. Google Drive assembles the received ranges into one complete private file; QuickShare does not store separate packet files or run a server-side reassembly job.
+
+For downloads larger than 4 MiB, QuickShare displays a downloader page. In desktop Microsoft Edge or Google Chrome, the user chooses a destination file, then the browser fetches 4 MiB byte ranges through the Vercel app and writes each range directly to disk. The app never buffers the entire multi-gigabyte file in one function response or one large browser Blob. Google Drive remains private; recipients do not need to sign in to the storage administrator's account.
 
 ### Permission model
 
 - Standard signed-in Google accounts may upload up to 5 GB per file.
-- Add approved verified Google account emails to Vercel `LARGE_UPLOAD_ALLOWED_EMAILS`, comma-separated, to allow those accounts up to 50 GB per file.
-- Approval is server-side; changing the browser/UI cannot raise an account's permitted limit.
-- Large files must use the central Google Drive option. GitHub storage stays the small-file/public option.
+- Add approved verified Google account emails to Vercel `LARGE_UPLOAD_ALLOWED_EMAILS`, comma-separated, to allow those accounts up to 50 GB per file. Leave it blank to approve nobody.
+- The tier is enforced server-side; changing the browser UI cannot raise an account's permitted limit.
+- Large files must use the central Google Drive option. GitHub storage remains the small-file/public option.
 
-### VPS deployment
+### Important trade-offs
 
-1. Create a DNS **A** record for `transfer.qshare.darshanup.online` pointing to the public IP of the existing VPS.
-2. On the VPS, clone/pull this repo into `/opt/quickshare-cloud`; install Python, create `.venv`, then run `.venv/bin/pip install -r requirements.txt gunicorn`.
-3. Create a dedicated service account named `quickshare` and a persistent writable directory: `/var/lib/quickshare-transfer`.
-4. Copy `deploy/quickshare-transfer.env.example` to `/etc/quickshare-transfer.env`. Fill in the same `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` used by the web app; set `TRANSFER_TOKEN_SECRET` to a long random secret. Protect the file with `chmod 600 /etc/quickshare-transfer.env`.
-5. In `/etc/quickshare-transfer.env`, set `TRANSFER_WEB_BASE_URL=https://qshare.darshanup.online`. The transfer service re-validates each initial/ranged download against the current QuickShare metadata, so revocation and expiry continue to apply after the redirect.
-6. Install `deploy/quickshare-transfer.service` as `/etc/systemd/system/quickshare-transfer.service`. Confirm the service user, repo path and venv path in the unit match the actual VPS setup. Then run `systemctl daemon-reload`, `systemctl enable --now quickshare-transfer`.
-7. Configure the VPS HTTPS reverse proxy for `transfer.qshare.darshanup.online` to `127.0.0.1:8081`. `deploy/Caddyfile.transfer.example` is an example for Caddy; adapt it if the VPS already uses Nginx or another proxy.
-8. Verify `https://transfer.qshare.darshanup.online/health` returns `{"status":"ok","service":"QuickShare transfer"}`.
-9. In Vercel Production, set `TRANSFER_SERVICE_URL=https://transfer.qshare.darshanup.online`, set the **same** `TRANSFER_TOKEN_SECRET`, and set `LARGE_UPLOAD_ALLOWED_EMAILS` to the email addresses you approve. Redeploy.
-
-Use the same Google Drive folder configuration on both the Vercel app and VPS if `GOOGLE_DRIVE_FOLDER_ID` is set. Never commit the actual transfer secret or Drive credentials. The central Drive account must have enough free storage for the uploaded files; a 50 GB per-file application permission does not increase the Drive account's quota.
+- A 5 GiB download takes about 1,280 Vercel range requests; a 50 GiB download takes about 12,800. These requests consume Vercel function invocations and network transfer, so check plan quotas/usage before promoting 50 GB transfers to many users.
+- If the browser does not support the File System Access API, the fallback is limited to smaller downloads to avoid exhausting browser memory. For 5–50 GB files, use a recent desktop Edge or Chrome browser.
+- A link's expiry is embedded in each signed download ticket. The app refreshes the ticket periodically and checks current revocation/expiry when refreshing. Revocation can therefore take effect at the next ticket refresh for an already-started large download.
+- A 50 GB per-file limit does not increase the central Google Drive account's available storage quota. Ensure the Drive account has sufficient free space.
 
 ## Tests
 
