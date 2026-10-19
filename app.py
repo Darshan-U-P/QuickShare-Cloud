@@ -209,15 +209,17 @@ def _is_storage_admin() -> bool:
 
 def _is_admin_host_request() -> bool:
     host = (request.host or "").split(":", 1)[0].rstrip(".").lower()
-    if host == ADMIN_PANEL_HOST:
-        return True
-    # Keep the admin UI testable in local Flask tests and local development.
-    return bool(app.testing and host in {"localhost", "127.0.0.1", "testserver"})
+    return host == ADMIN_PANEL_HOST
 
 
 def _require_admin_host() -> None:
-    if not _is_admin_host_request():
-        abort(404)
+    host = (request.host or "").split(":", 1)[0].rstrip(".").lower()
+    if host == ADMIN_PANEL_HOST:
+        return
+    # Permit local Flask tests and local development, but never production aliases.
+    if app.testing and host in {"localhost", "127.0.0.1", "testserver"}:
+        return
+    abort(404)
 
 
 def _get_large_upload_allowlist(*, force_refresh: bool = False) -> set[str]:
