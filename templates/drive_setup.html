@@ -45,27 +45,6 @@
     </article>
   </div>
 
-  <section class="card storage-setup-instructions">
-    <div class="section-kicker">ONE-TIME SETUP</div>
-    <h2>Connect your storage account</h2>
-    <ol>
-      <li>Enable the <a href="https://console.cloud.google.com/apis/library/drive.googleapis.com" target="_blank" rel="noopener noreferrer">Google Drive API</a> in the same Google Cloud project.</li>
-      <li>In Google Auth Platform → Data access, add the scope <code>https://www.googleapis.com/auth/drive.file</code>.</li>
-      <li>In Google Auth Platform → Clients → QuickShare Cloud Web, add this exact Authorized redirect URI:</li>
-    </ol>
-    <div class="copy-row storage-callback-row">
-      <input id="drive-callback-uri" value="{{ drive_redirect_uri }}" readonly aria-label="Google Drive callback URL">
-      <button class="btn btn-copy" type="button" data-copy-target="drive-callback-uri">Copy callback</button>
-    </div>
-    <ol start="3">
-      <li>Set <code>STORAGE_ADMIN_EMAIL</code> in Vercel to the Google account that should own stored files.</li>
-      <li>Sign in to QuickShare with that same account, then click <strong>Connect Google Drive</strong> above.</li>
-      <li>Copy the refresh token shown after consent and add it to Vercel as <code>GOOGLE_DRIVE_REFRESH_TOKEN</code>. Set <code>GOOGLE_DRIVE_REDIRECT_URI</code> to the same callback URL shown above. Keep <code>GOOGLE_CLIENT_ID</code> and <code>GOOGLE_CLIENT_SECRET</code> configured too.</li>
-      <li>Redeploy so Google Drive becomes available in the upload form.</li>
-    </ol>
-    <div class="storage-warning"><strong>Privacy note</strong><p>The file contents are private in Drive when the Google Drive option is selected. Share metadata—including original filename, expiry, download counts, and an account-owner hash—continues to be stored in the public GitHub repository. Avoid sensitive filenames. Google OAuth apps left in Testing mode can issue refresh tokens that expire after seven days for scopes beyond basic sign-in.</p></div>
-  </section>
-
   {% if one_time_refresh_token %}
   <section class="card drive-token-card">
     <div class="section-kicker">SAVE THIS TOKEN NOW</div>
