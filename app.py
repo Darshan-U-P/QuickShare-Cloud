@@ -89,9 +89,7 @@ DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
 DOWNLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
-# Only this verified Google account may use administrator functionality.
-# The configured STORAGE_ADMIN_EMAIL should use the same address.
-ADMIN_ALLOWED_EMAIL = "darshandileep4@gmail.com"
+# The verified administrator identity is configured privately via STORAGE_ADMIN_EMAIL.
 ADMIN_PANEL_HOST = "adminqshare.darshanup.online"
 ADMIN_PANEL_BASE_URL = f"https://{ADMIN_PANEL_HOST}"
 TRANSFER_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
@@ -204,19 +202,19 @@ def _is_current_user_owner(metadata: dict) -> bool:
 
 
 
+def _configured_storage_admin_email() -> str:
+    return os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower()
+
+
 def _is_storage_admin() -> bool:
     user = _current_user()
     email = str(user.get("email", "")).strip().lower() if user else ""
-    return bool(user and email == ADMIN_ALLOWED_EMAIL)
+    admin_email = _configured_storage_admin_email()
+    return bool(user and admin_email and email == admin_email)
 
 
 def _not_admin_response():
-    user = _current_user() or {}
-    return render_template(
-        "not_admin.html",
-        account_email=str(user.get("email", "")).strip(),
-        allowed_admin_email=ADMIN_ALLOWED_EMAIL,
-    ), 403
+    return render_template("not_admin.html"), 403
 
 
 def _is_admin_host_request() -> bool:
@@ -496,7 +494,6 @@ def admin_storage():
     return render_template(
         "drive_setup.html",
         drive_storage_ready=_drive_storage_ready(),
-        storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
         drive_redirect_uri=redirect_uri,
     )
 
@@ -521,7 +518,6 @@ def admin_transfer_permissions():
         "transfer_permissions.html",
         approved_emails=approved_emails,
         drive_storage_ready=drive_ready,
-        storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
         permission_error=permission_error,
     )
 
@@ -609,10 +605,10 @@ def google_drive_callback():
         if not userinfo:
             userinfo = oauth.google_drive.userinfo(token=token)
         email = str(userinfo.get("email", "")).strip().lower()
-        if userinfo.get("email_verified") is not True or email != os.getenv("STORAGE_ADMIN_EMAIL", "").strip().lower():
+        if userinfo.get("email_verified") is not True or email != _configured_storage_admin_email():
             flash(
-                f"Connect Drive using the authorized admin account {ADMIN_ALLOWED_EMAIL}. "
-                "Ensure STORAGE_ADMIN_EMAIL is set to the same address in Vercel.",
+                "Connect Drive using the verified Google account configured for storage administration. "
+                "Check STORAGE_ADMIN_EMAIL in the deployment settings.",
                 "error",
             )
             return redirect(f"{ADMIN_PANEL_BASE_URL}/admin/storage")
@@ -620,8 +616,7 @@ def google_drive_callback():
         return render_template(
             "drive_setup.html",
             drive_storage_ready=_drive_storage_ready(),
-            storage_admin_email=os.getenv("STORAGE_ADMIN_EMAIL", ""),
-            drive_redirect_uri=os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True),
+                drive_redirect_uri=os.getenv("GOOGLE_DRIVE_REDIRECT_URI", "").strip() or url_for("google_drive_callback", _external=True),
             one_time_refresh_token=refresh_token,
             refresh_token_missing=not bool(refresh_token),
         )

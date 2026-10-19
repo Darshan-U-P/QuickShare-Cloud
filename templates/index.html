@@ -108,9 +108,6 @@
             <span class="select-arrow" aria-hidden="true">⌄</span>
           </div>
           <p class="storage-provider-help" id="storage-provider-help">GitHub files are public and can be accessed outside QuickShare.</p>
-          {% if is_storage_admin and not google_drive_storage_ready %}
-          <a class="storage-setup-link" href="{{ url_for('admin_storage') }}">Connect Google Drive to enable private file storage ↗</a>
-          {% endif %}
         </div>
 
         <div class="form-options">

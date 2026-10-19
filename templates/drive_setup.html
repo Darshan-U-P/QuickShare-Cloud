@@ -41,7 +41,7 @@
       {% if not drive_storage_ready %}
         <a class="btn btn-primary storage-connect-button" href="{{ url_for('connect_google_drive') }}">Connect Google Drive ↗</a>
       {% else %}
-        <p class="storage-connected-note">Connected storage account: {{ storage_admin_email }}</p>
+        <p class="storage-connected-note">Connected to the configured private storage account.</p>
       {% endif %}
     </article>
   </div>

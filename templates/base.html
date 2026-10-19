@@ -27,7 +27,7 @@
         {% if session.get('user') %}
           <a href="{{ url_for('my_shares') }}">My Shares</a>
 
-          <span class="account-chip" title="{{ session.get('user', {}).get('email', '') }}"><span class="account-avatar">{{ session.get('user', {}).get('name', 'Q')[:1]|upper }}</span><span class="account-name">{{ session.get('user', {}).get('name', 'Account') }}</span></span>
+          <span class="account-chip"><span class="account-avatar">{{ session.get('user', {}).get('name', 'Q')[:1]|upper }}</span><span class="account-name">{{ session.get('user', {}).get('name', 'Account') }}</span></span>
           <a class="nav-cta" href="{{ url_for('logout') }}">Sign out <span aria-hidden="true">↗</span></a>
         {% else %}
           <a class="nav-cta google-login-cta" href="{{ url_for('login') }}"><span class="google-g">G</span> Sign in with Google</a>
