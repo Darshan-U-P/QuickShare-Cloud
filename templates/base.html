@@ -9,7 +9,7 @@
   <meta name="description" content="QuickShare Cloud — share small files with a QR code, expiring links and download controls.">
   <title>{% block title %}QuickShare Cloud{% endblock %}</title>
   <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='11') }}">
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css', v='4') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/modern.css', v='5') }}">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -26,7 +26,7 @@
         <a href="{{ url_for('index') }}#how-it-works">How it works</a>
         {% if session.get('user') %}
           <a href="{{ url_for('my_shares') }}">My Shares</a>
-          {% if is_storage_admin %}<a href="{{ url_for('admin_storage') }}">Storage</a><a href="{{ url_for('admin_transfer_permissions') }}">Transfer access</a>{% endif %}
+
           <span class="account-chip" title="{{ session.get('user', {}).get('email', '') }}"><span class="account-avatar">{{ session.get('user', {}).get('name', 'Q')[:1]|upper }}</span><span class="account-name">{{ session.get('user', {}).get('name', 'Account') }}</span></span>
           <a class="nav-cta" href="{{ url_for('logout') }}">Sign out <span aria-hidden="true">↗</span></a>
         {% else %}
