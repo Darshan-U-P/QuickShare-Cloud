@@ -56,6 +56,26 @@
           <button class="remove-file" type="button" id="remove-file" aria-label="Remove selected file">×</button>
         </div>
 
+        <div class="field storage-provider-field">
+          <label for="storage_provider">Store the file using</label>
+          <div class="select-wrap">
+            <span class="field-icon" aria-hidden="true">☁</span>
+            <select id="storage_provider" name="storage_provider">
+              <option value="github" selected>GitHub · Public file storage</option>
+              {% if google_drive_storage_ready %}
+              <option value="google_drive">Google Drive · Private file storage</option>
+              {% else %}
+              <option value="google_drive" disabled>Google Drive · Setup required</option>
+              {% endif %}
+            </select>
+            <span class="select-arrow" aria-hidden="true">⌄</span>
+          </div>
+          <p class="storage-provider-help" id="storage-provider-help">GitHub files are public and can be accessed outside QuickShare.</p>
+          {% if is_storage_admin and not google_drive_storage_ready %}
+          <a class="storage-setup-link" href="{{ url_for('admin_storage') }}">Connect Google Drive to enable private file storage ↗</a>
+          {% endif %}
+        </div>
+
         <div class="form-options">
           <div class="field">
             <label for="expiry">Link expires after</label>
@@ -116,7 +136,7 @@
       <span class="privacy-icon" aria-hidden="true">!</span>
       <div>
         <strong>Only upload non-sensitive files</strong>
-        <p>Files are stored in a public GitHub repository. Expiry and download limits apply inside QuickShare and cannot block direct access through GitHub.</p>
+        <p>GitHub file storage is public. Google Drive keeps file contents private. For either option, share metadata (including filename, expiry and download counts) is currently stored in the public GitHub repository.</p>
       </div>
     </div>
     <div class="mini-stats">
