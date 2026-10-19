@@ -397,7 +397,10 @@ def upload():
         flash("The selected file is too large. The maximum is 4 MB.", "error")
         return redirect(url_for("index"))
 
-    storage_provider = request.form.get("storage_provider", "github").strip().lower()
+    storage_provider = request.form.get(
+        "storage_provider",
+        "google_drive" if _drive_storage_ready() else "github",
+    ).strip().lower()
     if storage_provider not in {"github", "google_drive"}:
         flash("Choose a valid storage provider.", "error")
         return redirect(url_for("index"))
