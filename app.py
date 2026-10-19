@@ -235,10 +235,14 @@ def _transfer_download_url(file_record: dict) -> str:
         size = 0
     if size < 1 or size > MAX_APPROVED_UPLOAD_BYTES:
         raise StorageError("This file size is outside the supported large-transfer range.")
+    file_id = str(file_record.get("drive_file_id", "")).strip()
+    share_id = str(file_record.get("share_id", "")).strip()
+    if not file_id or not SHARE_ID_PATTERN.fullmatch(share_id):
+        raise StorageError("This share is missing a valid Google Drive file reference.")
     payload = {
         "jti": secrets.token_hex(16),
-        "share_id": str(file_record.get("share_id", "")),
-        "file_id": str(file_record.get("drive_file_id", "")),
+        "share_id": share_id,
+        "file_id": file_id,
         "filename": str(file_record.get("original_filename", "download.bin"))[:200],
         "size": size,
         "exp_at": int(datetime.now(timezone.utc).timestamp()) + TRANSFER_TICKET_MAX_AGE_SECONDS,
