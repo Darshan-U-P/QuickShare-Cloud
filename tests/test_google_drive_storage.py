@@ -205,3 +205,88 @@ def test_resumable_chunk_recovers_when_previous_chunk_was_already_committed(monk
     assert result == {"complete": False, "next_offset": 8}
     assert len(calls) == 2
     assert calls[1]["Content-Range"] == "bytes */100"
+
+
+
+def test_private_large_upload_allowlist_defaults_to_empty(monkeypatch):
+    monkeypatch.setattr(drive, "_ensure_folder", lambda: "private-folder-id")
+    monkeypatch.setattr(drive, "_list_files", lambda *args, **kwargs: [])
+    assert drive.get_large_upload_allowlist() == []
+
+
+def test_private_large_upload_allowlist_reads_and_normalizes_drive_config(monkeypatch):
+    import json
+
+    monkeypatch.setattr(drive, "_ensure_folder", lambda: "private-folder-id")
+    monkeypatch.setattr(
+        drive,
+        "_list_files",
+        lambda *args, **kwargs: [{"id": "private-config-id", "name": drive.LARGE_UPLOAD_CONFIG_NAME}],
+    )
+    monkeypatch.setattr(drive, "_headers", lambda: {"Authorization": "Bearer test"})
+    monkeypatch.setattr(
+        drive.requests,
+        "get",
+        lambda *args, **kwargs: FakeResponse(
+            200,
+            content=json.dumps({
+                "version": 1,
+                "approved_emails": [" USER@Example.com ", "bad-entry", "user@example.com"],
+            }).encode("utf-8"),
+        ),
+    )
+    assert drive.get_large_upload_allowlist() == ["user@example.com"]
+
+
+def test_private_large_upload_allowlist_creates_config_in_drive_folder(monkeypatch):
+    import json
+
+    monkeypatch.setattr(drive, "_ensure_folder", lambda: "private-folder-id")
+    monkeypatch.setattr(drive, "_list_files", lambda *args, **kwargs: [])
+    monkeypatch.setattr(drive, "_headers", lambda: {"Authorization": "Bearer test"})
+    seen = {}
+
+    def fake_post(url, headers, params, data, timeout):
+        seen.update(url=url, headers=headers, params=params, data=data, timeout=timeout)
+        return FakeResponse(200, {"id": "private-config-id"})
+
+    monkeypatch.setattr(drive.requests, "post", fake_post)
+    saved = drive.set_large_upload_allowlist([" User@Example.com ", "user@example.com", "Other@example.com"])
+    assert saved == ["other@example.com", "user@example.com"]
+    assert seen["params"]["uploadType"] == "multipart"
+    assert "private-folder-id" in seen["data"].decode("utf-8")
+    assert "quickshareConfigKey" in seen["data"].decode("utf-8")
+    assert "user@example.com" in seen["data"].decode("utf-8")
+    assert json.loads(seen["data"].decode("utf-8").split("Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n")[-1].split("\\r\\n--")[0])["approved_emails"] == ["other@example.com", "user@example.com"]
+
+
+def test_private_large_upload_allowlist_updates_existing_config(monkeypatch):
+    import json
+
+    monkeypatch.setattr(
+        drive,
+        "_large_upload_config_file",
+        lambda: {"id": "private-config-id", "name": drive.LARGE_UPLOAD_CONFIG_NAME},
+    )
+    monkeypatch.setattr(drive, "_headers", lambda: {"Authorization": "Bearer test"})
+    seen = {}
+
+    def fake_patch(url, headers, params, data, timeout):
+        seen.update(url=url, headers=headers, params=params, data=data, timeout=timeout)
+        return FakeResponse(200, {"id": "private-config-id"})
+
+    monkeypatch.setattr(drive.requests, "patch", fake_patch)
+    saved = drive.set_large_upload_allowlist(["UPLOADED@example.com"])
+    assert saved == ["uploaded@example.com"]
+    assert seen["url"].endswith("/files/private-config-id")
+    assert seen["params"] == {"uploadType": "media"}
+    assert json.loads(seen["data"].decode("utf-8"))["approved_emails"] == ["uploaded@example.com"]
+
+
+def test_private_large_upload_allowlist_rejects_invalid_email(monkeypatch):
+    import pytest
+    from services.storage_errors import StorageError
+
+    monkeypatch.setattr(drive, "_large_upload_config_file", lambda: None)
+    with pytest.raises(StorageError):
+        drive.set_large_upload_allowlist(["not-an-email"])
