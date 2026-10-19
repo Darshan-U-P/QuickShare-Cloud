@@ -1,110 +1,333 @@
 # QuickShare Cloud
 
-A zero-extra-service-cost cloud computing mini-project: QR-code file sharing hosted on Vercel, with Google sign-in, account-scoped share management, expiring links and selectable GitHub or Google Drive file storage.
+QuickShare Cloud is a QR-code and expiring-link file-sharing web application built with Flask, Google OpenID Connect, GitHub's Contents API, Google Drive, and Vercel. It is designed as a cloud-computing mini-project and supports private central Drive storage, small public GitHub storage, per-user share management, and resumable large-file transfers without a separate VPS.
+
+> **Important:** “5 GB” and “50 GB” are application per-file limits, not a promise of unlimited storage or bandwidth. Google Drive quota, Google API policy, Vercel function usage, execution limits, and browser capabilities still apply.
+
+## Contents
+
+- [Features](#features)
+- [Architecture](#architecture)
+- [How uploads work](#how-uploads-work)
+- [How downloads work](#how-downloads-work)
+- [Storage and metadata model](#storage-and-metadata-model)
+- [Administrator access and 50 GB permissions](#administrator-access-and-50-gb-permissions)
+- [Local development](#local-development)
+- [Production deployment](#production-deployment)
+- [Environment variables](#environment-variables)
+- [Google OAuth and Drive setup](#google-oauth-and-drive-setup)
+- [Routes and APIs](#routes-and-apis)
+- [Security and privacy](#security-and-privacy)
+- [Limits and known trade-offs](#limits-and-known-trade-offs)
+- [Troubleshooting](#troubleshooting)
+- [Tests](#tests)
 
 ## Features
 
-- Google OpenID Connect sign-in; each account sees and manages only its own shares.
-- Resumable Google Drive uploads: 5 GB per file by default; the storage administrator can grant/revoke 50 GB access in the Transfer Access admin panel.
-- File contents upload directly from the browser to Google Drive in resumable chunks, avoiding Vercel's request-body limit.
-- Large private downloads use 4 MiB byte ranges through Vercel and are written directly to the recipient's local file; no additional VPS is required.
-- Choose a file-storage provider per upload:
-  - **Google Drive**: once the administrator connects one Drive account, this becomes the default central storage for every user's uploads; file contents stay private in that account.
-  - **GitHub**: retained as an alternative; file contents are public.
-- Public QR-code share pages; recipients do not need to sign in.
-- Server-enforced expiry, download limits, revocation, recent activity, and automatic cleanup routed to the selected file provider.
-- Drive OAuth connection is restricted to the configured storage administrator.
-- CSRF checks, server-side file-size authorization, Drive upload-finalization verification, signed download tickets, and GitHub Actions tests.
+- Google sign-in using OpenID Connect.
+- My Shares dashboard: users can manage only the shares associated with their own authenticated Google account.
+- Google Drive private storage, using one central administrator-connected Drive account for the application's users.
+- GitHub storage as an optional alternative for small files; GitHub-stored file contents are public.
+- Resumable, chunked upload: standard accounts can upload files up to **5 GB**; accounts explicitly approved by the administrator can upload files up to **50 GB**.
+- Upload progress feedback, bounded chunks, retries, and server-side validation.
+- Large-file downloads in 4 MiB byte ranges, written directly to a file selected by the recipient in supported desktop browsers.
+- Share pages and QR codes; recipients do not need to sign in merely to download a valid share.
+- Configurable expiry (10 minutes, 1 hour, 24 hours, or 7 days), download limits (1, 3, 5, or 10), share revocation, activity summaries, and cleanup.
+- Separate administrator host with account-based server-side checks.
+- CSRF checks for state-changing requests, signed upload/download tickets, upload-finalization verification, and automated tests.
 
-## Architecture note: metadata is still on GitHub
+## Architecture
 
-In this implementation, the **file bytes** may be stored in GitHub or in Google Drive depending on the provider selected during upload. Share metadata continues to be stored as JSON in the configured public GitHub storage repository for both options. This includes original filename, share expiry, download counts, event summaries and a keyed owner hash. Therefore Google Drive makes file contents private, but it does **not** make share metadata private. Use non-sensitive filenames and avoid placing private information in file names.
+QuickShare deliberately separates the **control plane** (authentication, share metadata, policy checks) from the **file-data path** (small bounded chunks). It does not create one enormous HTTP request containing a multi-gigabyte file.
 
-Older GitHub shares continue to use the default `storage_provider: github` when no provider is specified. New shares remember their provider so download, revoke, expiry and cleanup use the matching backend.
+```mermaid
+flowchart TD
+    Sender[Sender browser] -->|Google sign-in and app pages| App[Flask app on Vercel]
+    Sender -->|4 MiB upload chunks| App
+    App -->|OAuth refresh and resumable chunk forwarding| Drive[Private Google Drive]
+    App -->|Share JSON metadata and activity| GH[GitHub Contents API / public metadata repository]
+    Recipient[Recipient browser] -->|Share page and access checks| App
+    Recipient -->|4 MiB byte-range requests| App
+    App -->|Authenticated byte-range reads| Drive
+    Admin[Admin browser] -->|Admin subdomain + Google session| App
+    App -->|Private allowlist configuration| Drive
+    Cron[Vercel Cron] -->|Bearer-secret cleanup request| App
+```
 
-## Local setup
+### Main components
 
-1. Install Python 3.10 or newer.
+| Component | Responsibility |
+|---|---|
+| `app.py` | Flask routes, authentication, CSRF validation, upload/download ticket handling, share policy, admin authorization, and API responses. |
+| `services/google_drive_storage.py` | Refreshes Google OAuth access tokens, creates the private application folder, starts resumable uploads, forwards chunks, validates finished files, reads byte ranges, manages the private permission file, and deletes Drive files. |
+| `services/github_storage.py` | Reads and updates share metadata through the GitHub Contents API, serves GitHub-hosted public files, records download activity, revokes shares, and runs cleanup. |
+| `templates/` | Server-rendered HTML pages, including the upload UI, share page, My Shares dashboard, Drive settings, large-download page, and admin permission panel. |
+| `static/js/app.js` | Client-side upload chunking, retries, progress, copy/share actions, and local-file large-download logic. |
+| `static/css/` | Main styles and responsive UI enhancements. |
+| `vercel.json` | Configures a daily Vercel Cron invocation of the cleanup endpoint. |
+| `tests/` | Flask-route, permission, chunk-transfer, Drive-storage, and other automated tests. |
+
+## How uploads work
+
+### Small GitHub uploads
+
+The GitHub storage option is kept for demos and small files. The upload is written to the configured GitHub storage repository using the Contents API. Those file bytes are public, even if a QuickShare share later expires or is revoked. Do not use GitHub storage for private files.
+
+### Google Drive uploads (4 MiB chunks)
+
+For larger files, the browser and server follow this workflow:
+
+1. **Check the request.** The signed-in user's file size, file extension, expiry choice, download limit, and permission tier are validated on the server.
+2. **Create an upload session.** QuickShare uses the administrator's Drive OAuth credentials to create a Google Drive resumable-upload session. The app stores the upload metadata, owner hash, upload nonce, session URL, and permitted byte limit inside a signed upload ticket.
+3. **Slice locally.** The sender's browser uses the File API to slice the original local file into chunks of at most 4 MiB. No independent temporary packet files are created on the user's disk.
+4. **Forward one chunk at a time.** The browser posts each chunk to the same-origin `/api/uploads/chunk` endpoint. The Vercel function forwards the bytes to Google's resumable-upload URL and returns the acknowledged offset. The browser retries transient failures and resumes from the acknowledged offset.
+5. **Verify finalization.** After Google reports completion, QuickShare asks Drive for the uploaded file's metadata and checks the file ID, actual size, parent folder, share ID and upload nonce.
+6. **Create the share record.** Only after verification does the app persist the share metadata in the GitHub metadata repository and redirect the sender to the share page.
+
+Google Drive assembles its received resumable-upload chunks into one normal Drive file. QuickShare does not upload a folder of packet files and does not run a reconstruction process on a VPS.
+
+## How downloads work
+
+### Files up to 4 MiB
+
+The normal download route retrieves the selected file through the appropriate storage provider after checking the share status and access rules.
+
+### Larger private Google Drive files
+
+1. Opening a large-file link displays the dedicated download page.
+2. The recipient clicks **Save file to your device**. In compatible desktop Edge or Chrome, the browser asks the recipient to select a destination file.
+3. QuickShare creates a signed, time-limited download ticket and reserves the share's download allowance.
+4. The browser requests 4 MiB ranges from `/api/download/chunk`. The server validates the signed ticket and requested byte range, then reads the corresponding range from private Drive storage.
+5. The browser writes each returned range at its correct byte offset in the chosen local file, so the entire file does not have to be held in browser memory.
+6. The client refreshes the ticket during a long transfer. Ticket refresh checks that the share still exists, has not expired or been revoked, and still refers to the same Drive file.
+
+The recipient does not need to log in to the storage administrator's Google account, and QuickShare does not make the Drive file publicly accessible.
+
+## Storage and metadata model
+
+QuickShare intentionally keeps the current metadata store separate from the file contents.
+
+### Google Drive provider
+
+- File contents live in a private folder named **QuickShare Cloud Storage** in the connected administrator's Drive (unless `GOOGLE_DRIVE_FOLDER_ID` points to a configured folder).
+- Uploads and reads use server-held OAuth credentials. The private file itself is not shared publicly with recipients.
+- An authorized recipient downloads through QuickShare's gated routes rather than a public Drive URL.
+- The allowlist for 50 GB uploads is stored as a JSON configuration file in the private application Drive folder.
+
+### GitHub provider
+
+- File contents are stored in the configured GitHub repository and are public.
+- QuickShare link expiry/revocation cannot prevent someone from accessing a public GitHub file directly if they have its raw repository URL.
+- Use this option only for files that are safe to publish.
+
+### Share metadata
+
+For both storage providers, share metadata is stored as JSON in the configured GitHub repository, which is public in the current deployment. Depending on the share, this can include:
+
+- Original filename, file size, storage provider, and internal file reference.
+- Upload and expiry times.
+- Maximum downloads, download count, revocation and cleanup status.
+- Activity summaries, and a keyed owner hash used to associate a share with an account.
+
+**Privacy warning:** Google Drive protects the file contents, but it does not make the public GitHub metadata private. Use non-sensitive filenames and avoid placing confidential information in filenames. The metadata repository is not a transactional database; optimistic SHA updates help detect conflicting edits, but high-concurrency transactions are not guaranteed.
+
+## Administrator access and 50 GB permissions
+
+### Admin-only host
+
+- Normal application: [`https://qshare.darshanup.online`](https://qshare.darshanup.online)
+- Admin panel: [`https://adminqshare.darshanup.online`](https://adminqshare.darshanup.online)
+- The admin host's root path redirects to the Large Transfer Permissions page.
+- Admin links are intentionally not displayed in the regular website navigation.
+- Admin routes require both the expected admin host and the designated Google account. The hostname being uncommon is not a substitute for authentication.
+
+The admin account is currently fixed in the source as `ADMIN_ALLOWED_EMAIL = "darshandileep4@gmail.com"`. Only this signed-in verified Google email can use Storage Settings and Transfer Permissions. An unauthorized account receives a **“You're not an admin”** page with HTTP 403. To change the administrator identity, change this source constant and redeploy. Keep Vercel's `STORAGE_ADMIN_EMAIL` set to the same email, because the Drive connection callback checks it too.
+
+In production, the Flask session cookie is configured for the parent domain `.darshanup.online` so the signed-in session can be reused between the public and admin subdomains. The regular Google sign-in callback remains on the public host.
+
+### 5 GB and 50 GB tiers
+
+| Tier | Per-file limit | How access is assigned |
+|---|---:|---|
+| Standard | 5 GB | Any signed-in Google account that is not on the approval list |
+| Approved | 50 GB | The administrator adds that email in the Transfer Permissions panel |
+
+To approve an account:
+
+1. Sign in to the admin panel using `darshandileep4@gmail.com`.
+2. Open **Large Transfer Permissions**.
+3. Enter the user's Google account email and select **Grant 50 GB access**.
+4. Confirm that the address appears in **Approved accounts**.
+
+To remove access, select **Revoke** next to that address. Changes affect new upload sessions. An upload session already issued a signed ticket with its allowed size may still complete, so revoke permission before the user starts a new upload.
+
+The list is normalized to lowercase, validated, and stored in private Drive configuration—not in the public GitHub metadata repository and not in a Vercel environment variable. The environment variable `LARGE_UPLOAD_ALLOWED_EMAILS` is not used by the current implementation.
+
+## Local development
+
+Requirements: Python 3.10 or newer and a Google/GitHub configuration if you want to use live storage providers.
+
+1. Clone the repository and enter its directory.
 2. Create and activate a virtual environment.
-3. Install dependencies: `pip install -r requirements-dev.txt`.
-4. Copy `.env.example` to `.env`; configure the GitHub and regular Google sign-in settings.
-5. For Google Drive mode, configure the additional storage settings below.
-6. Run `python app.py`.
+3. Install dependencies:
 
-Never commit `.env` or publish OAuth client secrets, refresh tokens, or GitHub tokens. Use a fine-grained GitHub token restricted to `QuickShare-Storage`, with Contents: Read and write permission.
+   ```bash
+   pip install -r requirements-dev.txt
+   ```
 
-## Google Drive storage setup
+4. Copy `.env.example` to `.env` and fill the required local values.
+5. Run the application:
 
-Only the storage administrator connects a Drive account; individual users do not connect their own Drive accounts. Once connected, Google Drive is selected by default for every user, while GitHub remains an optional per-upload choice.
+   ```bash
+   python app.py
+   ```
 
-1. In the same Google Cloud project, enable the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com).
-2. In Google Auth Platform → Clients → QuickShare Cloud Web, add this exact authorized redirect URI for the live custom domain: `https://qshare.darshanup.online/auth/google-drive/callback`. Keep the normal login callback too: `https://qshare.darshanup.online/auth/google/callback`.
-3. Add `STORAGE_ADMIN_EMAIL` in Vercel with the verified Google email address that will own the private Drive folder and files.
-4. Sign in to QuickShare using that account and open **Storage** in the navigation.
-5. Click **Connect Google Drive** and consent to `drive.file`. QuickShare asks only for access to files it creates/uses, not general access to all Drive files.
-6. Copy the one-time refresh token from the callback page directly into Vercel as `GOOGLE_DRIVE_REFRESH_TOKEN`. Also set `GOOGLE_DRIVE_REDIRECT_URI` to the exact callback URI. Keep the existing `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET`.
-7. Redeploy. The upload form will then enable the Google Drive option.
+6. Open `http://127.0.0.1:5000`.
 
-The Drive refresh token belongs to the storage administrator and must be kept secret. If it is revoked or expires, the Drive provider reports that it must be reconnected. Google states that refresh tokens for an external OAuth app in Testing status generally expire after seven days when non-basic scopes such as Drive access are requested. For ongoing use, review the app's publishing status in Google Auth Platform; if it is in Testing, expect to reconnect periodically.
+Do not commit `.env`, access tokens, refresh tokens, GitHub tokens, or client secrets. Some admin-host behavior is deliberately tied to the production host; tests exercise it using an admin-host request URL.
 
-## Vercel Environment Variables
+## Production deployment
 
-Keep the existing GitHub and Google login variables. Add these for Google Drive:
+### Vercel
 
-- `STORAGE_ADMIN_EMAIL` = the verified Google email permitted to connect storage.
-- `GOOGLE_DRIVE_REDIRECT_URI` = `https://qshare.darshanup.online/auth/google-drive/callback`
-- `GOOGLE_DRIVE_REFRESH_TOKEN` = the refresh token generated by the storage connection flow.
+1. Connect the `Darshan-U-P/QuickShare-Cloud` GitHub repository to a Vercel project.
+2. Set the environment variables documented below in the correct Vercel environment, normally **Production**.
+3. Deploy the `main` branch and confirm the deployment is **Ready** before testing it.
+4. Keep `qshare.darshanup.online` assigned to the project.
+5. In **Settings → Domains**, add `adminqshare.darshanup.online`.
+6. Add the exact DNS record Vercel shows at the provider that manages `darshanup.online`. Wait for Vercel to verify the domain and issue HTTPS.
+7. Test the public app, Google sign-in, Drive storage, admin restrictions, upload/download, and cleanup separately.
 
-The Drive selector is enabled only when `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, and `GOOGLE_DRIVE_REFRESH_TOKEN` are configured. Setting or changing Vercel environment variables requires a redeploy before the running functions use the new values.
+A new GitHub commit does not mean the new code is already live: check the matching Vercel deployment and its build logs. Environment-variable edits also require a redeploy.
 
-## Storage limits and privacy
+### Google OAuth callback URLs
 
-- **GitHub option:** the file contents are public and may be accessed directly even if a QuickShare link expires or is revoked.
-- **Google Drive option:** file content is private in the connected Drive account. QuickShare serves file bytes only after checking expiry, revocation and download count. Google Drive file IDs in metadata do not grant public access by themselves.
-- **Both options:** metadata is currently stored in the public GitHub repository. Metadata includes file name, file size, timing, download counts, activity summaries, provider, and a keyed owner hash. Do not use sensitive filenames.
-- Cleanup deletes a GitHub file from the latest branch revision (historical Git content may remain) or deletes the file from Google Drive, depending on provider.
-- This prototype uses GitHub Contents API as a metadata store and optimistic SHA updates; it is not a transactional database, so high-concurrency guarantees are limited.
-- The GitHub storage option remains limited to small demo files. For large private files, Google Drive is required. Vercel authorizes the upload and creates a resumable session. The sender's browser slices the file locally, then posts chunks of at most 4 MiB to a same-origin Vercel endpoint; the function forwards each chunk to Google's upload session. This avoids relying on direct cross-origin requests from the browser to Google's upload host while keeping each Vercel request below its payload limit. Google Drive assembles the chunks into one complete private file.
+In Google Auth Platform → Clients → the QuickShare web OAuth client, keep these authorized redirect URIs:
 
-Downloads are split into individual 4 MiB byte ranges fetched through Vercel and written by the recipient's browser to their chosen file. Each function request/response is bounded, but large transfers still use Vercel invocations and bandwidth.
+- Regular user login: `https://qshare.darshanup.online/auth/google/callback`
+- Google Drive connection: `https://qshare.darshanup.online/auth/google-drive/callback`
 
-## Administrator panel (private subdomain)
+Do not switch the regular callback to the admin subdomain unless the application and OAuth settings are deliberately changed together. The existing session-cookie configuration permits the admin subdomain to reuse the login session across the parent domain.
 
-Administrator tools are intentionally omitted from the normal QuickShare navigation. They are available at [`https://adminqshare.darshanup.online`](https://adminqshare.darshanup.online), which opens the large-transfer permissions panel. Storage settings and transfer approvals are restricted to this host and to the signed-in account matching `STORAGE_ADMIN_EMAIL`.
+### Vercel Cron
 
-To activate this host:
+`vercel.json` configures `/api/cron/cleanup` to run daily at 03:00 UTC. The endpoint requires the header `Authorization: Bearer <CRON_SECRET>`. Keep `CRON_SECRET` configured as a strong random secret. Cleanup inspects a bounded number of records per invocation, so it is a best-effort background cleanup rather than an instantaneous global scan.
 
-1. In Vercel, open the QuickShare Cloud project → **Settings → Domains** and add `adminqshare.darshanup.online`.
-2. Follow the exact DNS record Vercel displays and add it at the DNS provider for `darshanup.online`. Wait for Vercel to verify the domain and provision HTTPS.
-3. Keep the existing Google OAuth callback URI at `https://qshare.darshanup.online/auth/google/callback`. Production Flask sessions are shared across the two `darshanup.online` subdomains so the normal sign-in callback and admin host can use the same session.
+## Environment variables
 
-The subdomain is not a replacement for authentication: the admin routes also require a signed-in Google account whose verified email matches `STORAGE_ADMIN_EMAIL`. The domain is not active until Vercel and DNS are configured.
+Configure these in Vercel Production and in `.env` for local development where relevant.
 
-## Large-file transfers (5 GB standard / 50 GB approved)
+| Variable | Required? | Purpose |
+|---|---|---|
+| `SECRET_KEY` | Yes | Flask session signing and signed upload/download tickets. Use a long, random, stable secret. |
+| `OWNER_HASH_SECRET` | Strongly recommended | Separate key for the keyed owner hash in share metadata. Keep it stable across deployments; changing it can prevent old shares from matching their owners. |
+| `GITHUB_TOKEN` | Yes | GitHub token with Contents read/write access to the configured repository. |
+| `GITHUB_OWNER` | Yes | GitHub account or organization owning the metadata/storage repo. |
+| `GITHUB_REPO` | Yes | Repository used for public share metadata and optional public file storage (e.g. `QuickShare-Storage`). |
+| `GITHUB_BRANCH` | No | Branch for content writes; defaults to `main`. |
+| `GOOGLE_CLIENT_ID` | Yes for Google login/Drive | Web OAuth client ID from Google Cloud. |
+| `GOOGLE_CLIENT_SECRET` | Yes for Google login/Drive | OAuth client secret. Never publish it. |
+| `GOOGLE_REDIRECT_URI` | Recommended in production | Exact normal login callback: `https://qshare.darshanup.online/auth/google/callback`. |
+| `STORAGE_ADMIN_EMAIL` | Yes for Drive connection | Must match the fixed admin address `darshandileep4@gmail.com` in the current source, because the Drive callback checks this value. |
+| `GOOGLE_DRIVE_REDIRECT_URI` | Yes for Drive OAuth | Exact Drive callback: `https://qshare.darshanup.online/auth/google-drive/callback`. |
+| `GOOGLE_DRIVE_REFRESH_TOKEN` | Yes for private Drive storage | Refresh token shown by the Drive connection callback. Do not use an access token or client secret in its place. |
+| `GOOGLE_DRIVE_FOLDER_ID` | Optional | Use a specific authorized Drive folder ID if desired; otherwise the app ensures its application folder. |
+| `MAX_CONTENT_LENGTH_MB` | No | Flask request-body cap; default and maximum currently are 4 MiB to fit Vercel's request payload constraint. |
+| `CRON_SECRET` | Yes for cleanup | Random secret required by the scheduled cleanup endpoint. |
+| `PUBLIC_BASE_URL` | Optional/legacy | Retained in the environment template for deployment configuration compatibility. |
+| `FLASK_DEBUG` | Local only | Set to `1` for local debugging; do not enable debug mode in production. |
 
-### Managing 50 GB access
+Do **not** add `LARGE_UPLOAD_ALLOWED_EMAILS`: the current admin panel stores the approved list privately in Google Drive.
 
-Open `/admin/transfers` while signed in with the account configured as `STORAGE_ADMIN_EMAIL`. Add or revoke verified Google account email addresses. The approval list is persisted in a private JSON configuration file in the connected Google Drive folder, not in the public GitHub metadata repository. New upload sessions receive a signed server-side tier limit; the browser cannot grant itself the higher tier. The environment variable `LARGE_UPLOAD_ALLOWED_EMAILS` is no longer used.
+## Google OAuth and Drive setup
 
+1. In the correct Google Cloud project, enable the [Google Drive API](https://console.cloud.google.com/apis/library/drive.googleapis.com).
+2. Add both callback URLs listed in [Production deployment](#production-deployment) to the OAuth client's **Authorized redirect URIs**.
+3. In Google Auth Platform → Data access, ensure the application requests the `https://www.googleapis.com/auth/drive.file` scope in its separate Drive consent flow.
+4. In Google Auth Platform → Audience, add the administrator account as a test user if the OAuth app is in Testing mode.
+5. Sign in as the designated administrator and open Storage Settings on the admin host. Use **Connect Google Drive** and approve access.
+6. Copy the refresh token shown by the callback directly into Vercel's `GOOGLE_DRIVE_REFRESH_TOKEN` value and redeploy.
 
-**No extra VPS is required.** The browser sends the file directly to Google Drive using a resumable upload session. Google Drive assembles the received ranges into one complete private file; QuickShare does not store separate packet files or run a server-side reassembly job.
+If the app is still in Testing mode, refresh tokens for non-basic Drive scopes commonly expire after seven days. If that happens, the storage administrator must reconnect Drive and replace the environment-variable token. Check Google Auth Platform's publishing status and verification requirements before switching the app to wider production use.
 
-For downloads larger than 4 MiB, QuickShare displays a downloader page. In desktop Microsoft Edge or Google Chrome, the user chooses a destination file, then the browser fetches 4 MiB byte ranges through the Vercel app and writes each range directly to disk. The app never buffers the entire multi-gigabyte file in one function response or one large browser Blob. Google Drive remains private; recipients do not need to sign in to the storage administrator's account.
+Never commit credentials or paste a refresh token into an issue, chat, screenshot, or public repository.
 
-### Permission model
+## Routes and APIs
 
-- Standard signed-in Google accounts may upload up to 5 GB per file.
-- Add approved verified Google account emails to Vercel `LARGE_UPLOAD_ALLOWED_EMAILS`, comma-separated, to allow those accounts up to 50 GB per file. Leave it blank to approve nobody.
-- The tier is enforced server-side; changing the browser UI cannot raise an account's permitted limit.
-- Large files must use the central Google Drive option. GitHub storage remains the small-file/public option.
+The following routes describe the current app shape. API endpoints require the appropriate signed-in session, ticket, or cron bearer secret as applicable.
 
-### Important trade-offs
+| Route | Purpose |
+|---|---|
+| `GET /` | Public homepage; on the admin host it redirects to `/admin/transfers`. |
+| `GET /login` | Starts Google OpenID Connect login. |
+| `GET /auth/google/callback` | Completes regular Google sign-in. |
+| `GET /my-shares` | Signed-in user's share dashboard. |
+| `GET /admin/storage` | Admin-only Drive configuration/status page on the admin host. |
+| `GET /admin/transfers` | Admin-only 50 GB allowlist panel. |
+| `POST /admin/transfers/add` | Grants approved upload access to an email. |
+| `POST /admin/transfers/remove` | Revokes approved upload access. |
+| `GET /admin/storage/google-drive/connect` | Starts the admin's Google Drive OAuth flow. |
+| `GET /auth/google-drive/callback` | Completes Drive authorization and presents the refresh token when Google returns one. |
+| `POST /api/uploads/initiate` | Validates upload options and creates a Drive resumable session. |
+| `POST /api/uploads/chunk` | Accepts one bounded chunk and forwards it to Drive. |
+| `POST /api/uploads/finalize` | Verifies the completed Drive file and persists share metadata. |
+| `GET /s/<share_id>` | Public share page and download instructions. |
+| `GET /qr/<share_id>.png` | QR code for a share. |
+| `GET /download/<share_id>` | Starts small-file download or displays the large-file downloader. |
+| `POST /api/download/initiate/<share_id>` | Validates a share and creates a signed download ticket. |
+| `POST /api/download/refresh` | Revalidates and refreshes a long-running download ticket. |
+| `POST /api/download/chunk` | Validates and returns one Drive byte range. |
+| `POST /api/shares/<share_id>/revoke` | Revokes a share owned by the signed-in account. |
+| `GET /api/cron/cleanup` | Scheduled cleanup, protected by `CRON_SECRET`. |
 
-- A 5 GiB file needs about 1,280 upload chunks and 1,280 download ranges; a 50 GiB file needs about 12,800 of each. Upload chunks and download ranges consume Vercel function invocations and network transfer, so check plan quotas/usage before promoting 50 GB transfers to many users.
-- If the browser does not support the File System Access API, the fallback is limited to smaller downloads to avoid exhausting browser memory. For 5–50 GB files, use a recent desktop Edge or Chrome browser.
-- A link's expiry is embedded in each signed download ticket. The app refreshes the ticket periodically and checks current revocation/expiry when refreshing. Revocation can therefore take effect at the next ticket refresh for an already-started large download.
-- A 50 GB per-file limit does not increase the central Google Drive account's available storage quota. Ensure the Drive account has sufficient free space.
+## Security and privacy
+
+- **Authentication:** regular sign-in verifies a Google identity and email. Share ownership is associated via an HMAC-derived owner hash instead of storing the Google subject as a plain value in each record.
+- **Admin authorization:** admin actions check the request host and the designated verified Google email in server-side code. Hiding links in HTML is not the security boundary.
+- **Signed upload tickets:** a ticket ties the upload to the user's owner hash, validated share metadata, Drive session URL, upload nonce, and allowed file-size tier. The finalization endpoint verifies the received Drive file before creating a share record.
+- **Signed download tickets:** a ticket ties the requested file to the share ID, Drive file ID, file size, filename, and time window. Chunk requests validate bounds and the upstream Drive content range.
+- **CSRF protection:** state-changing POST requests check the session's CSRF token.
+- **File validation:** the app checks names/extensions and blocks several executable/script-like extensions. This is basic filtering, not antivirus scanning; treat unknown files cautiously.
+- **Private Drive contents vs public metadata:** Drive file bytes remain private, but share metadata in GitHub is public. Do not put secrets in filenames.
+- **OAuth token security:** keep the Drive refresh token, OAuth client secret, GitHub token, Flask secret, owner-hash secret, and cron secret only in a secret manager/environment configuration.
+- **Admin account configuration:** the hard-coded admin identity and `STORAGE_ADMIN_EMAIL` must match. A mismatch may allow the login but prevent Drive authorization.
+- **Subdomain sessions:** production session cookies are configured for `.darshanup.online` to share the signed-in state across the public/admin hosts. The cookie is HTTP-only, SameSite=Lax, and Secure on Vercel HTTPS.
+
+## Limits and known trade-offs
+
+- Internal byte limits use binary 1024-based units; UI labels use the familiar “GB” shorthand.
+- Upload/download chunks are currently 4 MiB. A 5 GiB file is approximately 1,280 chunks; a 50 GiB file is approximately 12,800 chunks for upload and a similar number of download range requests.
+- Every upload chunk and download range uses Vercel function invocations and network transfer. A no-VPS architecture avoids maintaining a separate server, but it does not avoid Vercel usage, execution constraints, Google API quotas, or potential charges. Check your Vercel and Google limits before enabling frequent 50 GB transfers.
+- Very large downloads work best in current desktop Edge or Chrome where the File System Access API can write to a user-selected file. The fallback path refuses files larger than 512 MiB to avoid trying to buffer a huge file into a browser Blob.
+- Each large-download initiation reserves/counts one download allowance before all chunks have arrived. A cancelled or failed transfer may therefore consume a download slot.
+- Existing large-download tickets are periodically refreshed and checked for expiry/revocation. Revocation may take effect when the next ticket refresh is requested rather than instantly cancelling bytes already in flight.
+- The central Drive account needs sufficient free space and must remain authorized. The 50 GB application limit does not increase Drive quota.
+- GitHub Contents API metadata uses file SHA updates rather than database transactions. Concurrent metadata updates can conflict; retry if the app reports that a share changed during an update.
+- Expired-file cleanup is scheduled daily and is bounded per invocation, so a backlog can take multiple runs to clear.
+- If Google OAuth is in Testing mode, refresh tokens for the Drive scope commonly need renewal after seven days.
+
+## Troubleshooting
+
+| Symptom | What to check |
+|---|---|
+| `Google Drive authorization expired or was revoked` | Reconnect Drive from the admin host and replace `GOOGLE_DRIVE_REFRESH_TOKEN` in Vercel, then redeploy. |
+| `Access blocked` or account not allowed | Add the admin Google account to Google Auth Platform → Audience → Test users if the app is in Testing mode. |
+| `Google hasn't verified this app` | This warning can appear for an unverified/testing OAuth app. Continue only if you control and trust this app and the scopes shown are expected. |
+| Upload fails before progress starts | Open browser developer tools → Network and the Vercel Function logs. Check the response from `/api/uploads/initiate` or `/api/uploads/chunk`; do not share tokens or client secrets. |
+| Large upload is rejected at 5 GB | Confirm the signed-in Google email is listed in the admin Transfer Permissions panel and start a new upload session after approval. |
+| Admin page returns 404 | Confirm the request uses `adminqshare.darshanup.online` and that the domain is assigned to this Vercel project. |
+| “You're not an admin” | Sign in with `darshandileep4@gmail.com`; the admin address is fixed in source. |
+| Admin page asks for sign-in repeatedly | Confirm HTTPS, production session-cookie configuration, and that the public and admin hosts are under `darshanup.online`. |
+| Latest changes are not visible | Confirm the latest `main` commit has a Vercel deployment with status **Ready**, then hard-refresh the browser. |
+| Vercel reports `build-rate-limit` | Wait for the limit to clear and redeploy the latest commit; repeated redeploy clicks do not bypass a rate limit. |
 
 ## Tests
 
-Run `pytest -v`. GitHub Actions runs the test suite on pushes and pull requests to `main`.
+Install the development dependencies and run:
+
+```bash
+pip install -r requirements-dev.txt
+pytest -v
+```
+
+The tests cover authentication, CSRF enforcement, per-user share ownership, storage-provider selection, 5 GB/50 GB upload-tier enforcement, Drive upload finalization, upload-chunk forwarding, private large-download ranges, admin-host restrictions, and the “not an admin” denial behavior. GitHub Actions runs the test suite on pushes and pull requests to `main`.
