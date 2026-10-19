@@ -8,8 +8,10 @@ from urllib.parse import quote
 
 import requests
 
+from services.storage_errors import StorageError
 
-class GitHubStorageError(Exception):
+
+class GitHubStorageError(StorageError):
     """Safe, user-facing error raised for GitHub storage problems."""
 
 
@@ -275,6 +277,7 @@ def get_share_analytics(share_id: str, owner_id_hash: str) -> tuple[str, dict | 
         "status": share_status(metadata),
         "revoked_at": metadata.get("revoked_at"),
         "cleanup_status": metadata.get("cleanup_status", "pending"),
+        "storage_provider": metadata.get("storage_provider", "github"),
         "downloads": safe_events,
     }
 
@@ -307,6 +310,7 @@ def list_user_shares(owner_id_hash: str) -> list[dict]:
             "status": share_status(metadata),
             "revoked_at": metadata.get("revoked_at"),
             "cleanup_status": metadata.get("cleanup_status", "pending"),
+            "storage_provider": metadata.get("storage_provider", "github"),
             "downloads": safe_events,
         })
     shares.sort(key=lambda row: row.get("upload_time", ""), reverse=True)
@@ -457,7 +461,11 @@ def cleanup_expired_files(max_items: int = 20, max_scan: int = 100) -> dict:
                 continue
 
             cleanup_attempts += 1
-            deletion_result = delete_storage_file(metadata.get("storage_path", ""))
+            if metadata.get("storage_provider", "github") == "google_drive":
+                from services.google_drive_storage import delete_private_file
+                deletion_result = delete_private_file(metadata.get("drive_file_id", ""))
+            else:
+                deletion_result = delete_storage_file(metadata.get("storage_path", ""))
             cleanup_at = datetime.now(timezone.utc).isoformat(timespec="seconds")
 
             def mutate(current, result=deletion_result, stamp=cleanup_at):
@@ -480,7 +488,7 @@ def cleanup_expired_files(max_items: int = 20, max_scan: int = 100) -> dict:
             else:
                 summary["failed"] += 1
                 summary["items"].append({"share_id": share_id, "status": result})
-        except GitHubStorageError as exc:
+        except StorageError as exc:
             summary["failed"] += 1
             summary["items"].append({"share_id": share_id, "status": "failed", "message": str(exc)})
 
