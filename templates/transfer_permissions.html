@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Large Transfer Permissions · QuickShare Cloud{% endblock %}
+{% block content %}
+<section class="dashboard-page transfer-permissions-page">
+  <a class="back-link" href="{{ url_for('admin_storage') }}">← Back to Storage Settings</a>
+  <div class="dashboard-heading">
+    <div>
+      <div class="section-kicker">ADMIN ACCESS CONTROL</div>
+      <h1>Large transfer <span>permissions.</span></h1>
+      <p>Approve specific Google accounts to upload files up to 50 GB. All other signed-in accounts remain limited to 5 GB per file.</p>
+    </div>
+    <span class="status-pill {% if drive_storage_ready and not permission_error %}status-active{% else %}status-limit{% endif %}"><i></i>{% if drive_storage_ready and not permission_error %}Permissions storage ready{% else %}Setup needs attention{% endif %}</span>
+  </div>
+
+  {% if permission_error %}
+  <div class="transfer-permission-alert" role="status">
+    <span class="flash-icon" aria-hidden="true">!</span>
+    <div>
+      <strong>Permissions could not be loaded</strong>
+      <p>{{ permission_error }}</p>
+      {% if not drive_storage_ready %}<a href="{{ url_for('admin_storage') }}">Open Storage Settings ↗</a>{% endif %}
+    </div>
+  </div>
+  {% endif %}
+
+  <div class="transfer-tier-grid">
+    <article class="card transfer-tier-card transfer-tier-standard">
+      <div class="section-kicker">DEFAULT ACCESS</div>
+      <div class="transfer-tier-number">5 <span>GB</span></div>
+      <h2>Standard account</h2>
+      <p>Applies to every signed-in account that is not on the approved list.</p>
+    </article>
+    <article class="card transfer-tier-card transfer-tier-approved">
+      <div class="section-kicker">ADMIN APPROVAL REQUIRED</div>
+      <div class="transfer-tier-number">50 <span>GB</span></div>
+      <h2>Approved account</h2>
+      <p>The email must exactly match the account used to sign in to QuickShare with Google.</p>
+    </article>
+  </div>
+
+  <section class="card transfer-permission-panel">
+    <div class="transfer-panel-heading">
+      <div>
+        <div class="section-kicker">GRANT PERMISSION</div>
+        <h2>Approve an account</h2>
+        <p>Add a Google account email to grant the higher per-file upload limit.</p>
+      </div>
+      <span class="transfer-panel-count">{{ approved_emails|length }} approved</span>
+    </div>
+    <form class="transfer-approval-form" action="{{ url_for('admin_add_transfer_permission') }}" method="post">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+      <div class="field transfer-email-field">
+        <label for="approved-email">Google account email</label>
+        <input id="approved-email" name="email" type="email" maxlength="254" placeholder="person@example.com" autocomplete="off" required {% if not drive_storage_ready or permission_error %}disabled{% endif %}>
+      </div>
+      <button class="btn btn-primary" type="submit" {% if not drive_storage_ready or permission_error %}disabled{% endif %}><span aria-hidden="true">＋</span> Grant 50 GB access</button>
+    </form>
+    <p class="transfer-storage-note"><span aria-hidden="true">🔒</span> The approval list is stored in a private configuration file in your connected Google Drive, not in the public GitHub metadata repository.</p>
+  </section>
+
+  <section class="card transfer-permission-panel transfer-approved-list-panel">
+    <div class="transfer-panel-heading">
+      <div>
+        <div class="section-kicker">CURRENT APPROVALS</div>
+        <h2>Approved accounts</h2>
+        <p>Revoking access affects new uploads. Upload sessions that already have a signed ticket may still finish.</p>
+      </div>
+      <span class="transfer-panel-count">{{ approved_emails|length }} total</span>
+    </div>
+    {% if approved_emails %}
+      <div class="transfer-approved-list">
+        {% for email in approved_emails %}
+        <div class="transfer-approved-row">
+          <span class="transfer-approved-avatar" aria-hidden="true">{{ email[:1]|upper }}</span>
+          <div class="transfer-approved-info">
+            <strong>{{ email }}</strong>
+            <span>Up to 50 GB per file</span>
+          </div>
+          <form action="{{ url_for('admin_remove_transfer_permission') }}" method="post" onsubmit="return confirm('Revoke 50 GB transfer permission for {{ email }}?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+            <input type="hidden" name="email" value="{{ email }}">
+            <button class="btn btn-danger-soft" type="submit" {% if not drive_storage_ready or permission_error %}disabled{% endif %}>Revoke</button>
+          </form>
+        </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <div class="transfer-empty-state">
+        <span class="transfer-empty-icon" aria-hidden="true">⌁</span>
+        <strong>No accounts approved yet</strong>
+        <p>Enter a Google account above to grant 50 GB uploads. Everyone else stays on the 5 GB tier.</p>
+      </div>
+    {% endif %}
+  </section>
+</section>
+{% endblock %}
