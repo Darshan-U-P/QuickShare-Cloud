@@ -77,7 +77,7 @@ DOWNLOAD_LIMITS = {1, 3, 5, 10}
 MAX_GITHUB_UPLOAD_BYTES = 4 * 1024 * 1024
 MAX_STANDARD_UPLOAD_BYTES = 5 * 1024**3
 MAX_APPROVED_UPLOAD_BYTES = 50 * 1024**3
-DRIVE_UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024
+DRIVE_UPLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 UPLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
 DOWNLOAD_CHUNK_BYTES = 4 * 1024 * 1024
 DOWNLOAD_TICKET_WINDOW_SECONDS = 30 * 60
@@ -501,9 +501,6 @@ def api_upload_initiate():
         return jsonify({"error": "Resumable large uploads require Google Drive storage."}), 400
     if not _drive_storage_ready():
         return jsonify({"error": "Google Drive storage is not connected."}), 503
-    if file_size > MAX_GITHUB_UPLOAD_BYTES and not _large_transfer_ready():
-        return jsonify({"error": "Large files need the streaming transfer service configured before upload. Ask the administrator to finish transfer-service setup."}), 503
-
     user = _current_user()
     owner_id_hash = _current_owner_hash()
     if not user or not owner_id_hash:
@@ -529,7 +526,11 @@ def api_upload_initiate():
         "revoked": False,
         "cleanup_status": "pending",
     }
-    upload_ticket_data = {"metadata": metadata, "upload_nonce": upload_nonce}
+    upload_ticket_data = {
+        "metadata": metadata,
+        "upload_nonce": upload_nonce,
+        "session_uri": session_uri,
+    }
     try:
         session_uri = google_drive_storage.initiate_resumable_upload(
             storage_path=storage_path,
@@ -544,12 +545,90 @@ def api_upload_initiate():
 
     upload_ticket = _upload_ticket_serializer().dumps(upload_ticket_data)
     return jsonify({
-        "upload_session_url": session_uri,
         "upload_ticket": upload_ticket,
         "chunk_size": DRIVE_UPLOAD_CHUNK_BYTES,
         "file_size": file_size,
         "share_id": share_id,
     })
+
+
+@app.post("/api/uploads/chunk")
+@login_required
+def api_upload_chunk():
+    upload_ticket = request.headers.get("X-Upload-Ticket", "")
+    try:
+        ticket_data = _upload_ticket_serializer().loads(
+            upload_ticket,
+            max_age=UPLOAD_TICKET_MAX_AGE_SECONDS,
+        )
+    except SignatureExpired:
+        return jsonify({"error": "This upload session expired. Start the upload again."}), 410
+    except BadSignature:
+        return jsonify({"error": "This upload ticket is invalid."}), 400
+
+    metadata = ticket_data.get("metadata") if isinstance(ticket_data, dict) else None
+    session_uri = ticket_data.get("session_uri", "") if isinstance(ticket_data, dict) else ""
+    if not isinstance(metadata, dict) or not isinstance(session_uri, str):
+        return jsonify({"error": "The upload ticket is invalid."}), 400
+    try:
+        file_size = int(metadata.get("file_size", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "The upload file size is invalid."}), 400
+
+    expected_owner_hash = str(metadata.get("owner_id_hash", ""))
+    current_owner_hash = _current_owner_hash()
+    if not current_owner_hash or not hmac.compare_digest(current_owner_hash, expected_owner_hash):
+        return jsonify({"error": "This upload belongs to another signed-in account."}), 403
+    max_allowed = MAX_APPROVED_UPLOAD_BYTES if _large_upload_allowed() else MAX_STANDARD_UPLOAD_BYTES
+    if file_size <= 0 or file_size > max_allowed:
+        return jsonify({"error": "This account is not permitted to upload a file of this size."}), 413
+
+    content_range = request.headers.get("Content-Range", "").strip()
+    match = re.fullmatch(r"bytes (\\d+)-(\\d+)/(\\d+)", content_range)
+    if not match:
+        return jsonify({"error": "The upload chunk is missing a valid Content-Range header."}), 400
+    start, end, total = map(int, match.groups())
+    if (
+        total != file_size
+        or start < 0
+        or end < start
+        or end >= total
+        or end - start + 1 > DRIVE_UPLOAD_CHUNK_BYTES
+    ):
+        return jsonify({"error": "The upload chunk range is invalid."}), 416
+    try:
+        chunk = request.get_data(cache=False, as_text=False)
+    except Exception:
+        app.logger.exception("Could not read upload chunk")
+        return jsonify({"error": "QuickShare could not read this upload chunk. Retry it."}), 400
+    if len(chunk) != end - start + 1:
+        return jsonify({"error": "The upload chunk byte count does not match its Content-Range."}), 400
+
+    try:
+        result = google_drive_storage.upload_resumable_chunk(
+            session_uri,
+            start=start,
+            end=end,
+            total_size=total,
+            content=chunk,
+        )
+    except StorageError as exc:
+        app.logger.warning("Could not forward Drive upload chunk for share %s: %s", metadata.get("share_id"), exc)
+        return jsonify({"error": str(exc)}), 502
+
+    if result.get("complete"):
+        drive_file = result.get("file") or {}
+        if not drive_file.get("id"):
+            return jsonify({"error": "Google Drive completed the chunk but returned no file ID."}), 502
+        return jsonify({
+            "complete": True,
+            "next_offset": total,
+            "drive_file_id": drive_file["id"],
+        })
+    next_offset = result.get("next_offset", 0)
+    if not isinstance(next_offset, int) or next_offset < 0 or next_offset > total:
+        return jsonify({"error": "Google Drive returned an invalid upload offset."}), 502
+    return jsonify({"complete": False, "next_offset": next_offset})
 
 
 @app.post("/api/uploads/finalize")
