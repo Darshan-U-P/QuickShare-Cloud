@@ -292,7 +292,7 @@ def download_from_drive(token: str):
             _unclaim_ticket_if_new(ticket_id, cookie_secret)
         abort(502, description="Google Drive returned an incomplete file segment.")
 
-    filename = "".join(ch for ch in str(payload["filename"]) if ch not in "\\r\\n\\0")
+    filename = "".join(ch for ch in str(payload["filename"]) if ch not in "\r\n\0")
     fallback = re.sub(r"[^A-Za-z0-9._ -]", "_", filename).strip() or "download.bin"
     disposition = f'attachment; filename="{fallback.replace(chr(34), "_")}"; filename*=UTF-8\'\'{quote(filename)}'
     expected_cookie_hash = _cookie_digest(cookie_secret)
@@ -320,6 +320,7 @@ def download_from_drive(token: str):
     response.headers["Content-Disposition"] = disposition
     response.headers["Accept-Ranges"] = "bytes"
     response.headers["Cache-Control"] = "private, no-store"
+    response.headers["X-Accel-Buffering"] = "no"
     response.headers["X-Content-Type-Options"] = "nosniff"
     if is_range:
         response.headers["Content-Range"] = f"bytes {start}-{end}/{size}"
