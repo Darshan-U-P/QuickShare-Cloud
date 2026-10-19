@@ -1,5 +1,5 @@
 -- QuickShare Cloud initial relational schema.
--- Keep this file immutable after application; create a new numbered migration.
+-- Keep this file immutable after application. Create a new numbered migration.
 -- PostgreSQL 13+ is required for gen_random_uuid().
 
 CREATE TABLE users (

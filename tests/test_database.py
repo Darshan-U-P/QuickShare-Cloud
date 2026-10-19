@@ -47,9 +47,9 @@ def test_schema_has_required_tables_constraints_and_deletion_lifecycle():
 
 def test_sql_splitter_ignores_comment_only_fragments():
     statements = database._split_sql_statements("""
-        -- table comment
+        -- table comment; this semicolon must not become executable SQL
         CREATE TABLE sample (id integer PRIMARY KEY);
-        -- index comment
+        -- index comment; this semicolon is also ignored
         CREATE INDEX sample_id_idx ON sample (id);
     """)
     assert len(statements) == 2

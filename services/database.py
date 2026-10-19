@@ -136,15 +136,10 @@ def load_migrations(migrations_dir: Path | None = None) -> list[Migration]:
 
 def _split_sql_statements(script: str) -> list[str]:
     """Split simple DDL migrations without stored procedures or dollar-quoted blocks."""
-    statements = []
-    for fragment in script.split(";"):
-        lines = [
-            line for line in fragment.splitlines()
-            if line.strip() and not line.lstrip().startswith("--")
-        ]
-        if lines:
-            statements.append("\n".join(lines).strip())
-    return statements
+    # Remove full-line comments before splitting so a semicolon inside a
+    # comment cannot leave a fragment of comment text as executable SQL.
+    without_comments = re.sub(r"(?m)^\s*--.*$", "", script)
+    return [part.strip() for part in without_comments.split(";") if part.strip()]
 
 
 def run_migrations(migrations_dir: Path | None = None) -> list[str]:

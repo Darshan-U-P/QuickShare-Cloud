@@ -14,7 +14,7 @@ import sys
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from services import database
+from services import database, google_drive_storage
 from services.github_storage import _list_metadata_names, get_share_metadata
 from services.storage_errors import StorageError
 
@@ -237,6 +237,46 @@ def _import_one(conn, metadata: dict) -> tuple[bool, int]:
     return was_inserted, events_imported
 
 
+def _import_transfer_permissions() -> dict:
+    """Synchronize initial DB approvals to the private Drive source of truth."""
+    emails = sorted({
+        str(email).strip().lower()
+        for email in google_drive_storage.get_large_upload_allowlist()
+        if isinstance(email, str) and email.strip()
+    })
+    if any(len(email) > 254 or "@" not in email for email in emails):
+        raise ValueError("invalid_transfer_permission_email")
+
+    imported = 0
+    revoked = 0
+    with database.connection() as conn:
+        with conn.transaction():
+            active_rows = conn.execute(
+                "SELECT permission_id, email_normalized FROM transfer_permissions WHERE revoked_at IS NULL"
+            ).fetchall()
+            approved = set(emails)
+            for permission_id, email in active_rows:
+                if email not in approved:
+                    conn.execute(
+                        "UPDATE transfer_permissions SET revoked_at = now(), updated_at = now() WHERE permission_id = %s",
+                        (permission_id,),
+                    )
+                    revoked += 1
+            for email in emails:
+                row = conn.execute(
+                    """
+                    INSERT INTO transfer_permissions (email_normalized)
+                    VALUES (%s)
+                    ON CONFLICT DO NOTHING
+                    RETURNING permission_id
+                    """,
+                    (email,),
+                ).fetchone()
+                if row:
+                    imported += 1
+    return {"approved_in_drive": len(emails), "imported": imported, "revoked": revoked}
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--apply", action="store_true", help="Apply schema migrations and import records. Default is dry-run.")
@@ -296,6 +336,11 @@ def main() -> int:
                 except Exception as exc:
                     report["errors"].append({"share_id": share_id, "error": str(exc)[:250] or type(exc).__name__})
                     report["records_with_read_errors"] += 1
+        try:
+            report["transfer_permissions"] = _import_transfer_permissions()
+        except Exception as exc:
+            report["transfer_permissions_error"] = str(exc)[:250] or type(exc).__name__
+            report["records_with_read_errors"] += 1
     except database.DatabaseError as exc:
         print(str(exc), file=sys.stderr)
         return 1
