@@ -32,7 +32,7 @@
   {% elif error == "revoked" %}
     <div class="inline-alert alert-warning"><span aria-hidden="true">⊘</span><span>The owner revoked this share.</span></div>
   {% elif error == "storage" %}
-    <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The file could not be retrieved from GitHub storage. Check connectivity and try again.</span></div>
+    <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The file could not be retrieved from its configured storage provider. Check connectivity and try again.</span></div>
   {% elif error == "not_found" %}
     <div class="inline-alert alert-error"><span aria-hidden="true">!</span><span>The share could not be found.</span></div>
   {% elif error == "conflict" %}
