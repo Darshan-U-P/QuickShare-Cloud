@@ -45,7 +45,7 @@
         <span class="large-file-icon" aria-hidden="true"><svg viewBox="0 0 44 52" fill="none"><path d="M8 2h18l12 12v33a3 3 0 0 1-3 3H8a3 3 0 0 1-3-3V5a3 3 0 0 1 3-3Z" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round"/><path d="M26 2v13h12M12 28h18M12 35h18" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/></svg></span>
         <div class="file-heading">
           <span class="section-kicker">SHARED FILE</span><h2 title="{{ file.original_filename }}">{{ file.original_filename }}</h2>
-          <p>{{ "%.2f"|format(file.file_size / 1024) }} KB <span class="meta-dot">•</span> Uploaded <time data-format-date datetime="{{ file.upload_time }}">{{ file.upload_time }}</time></p>
+          <p>{{ "%.2f"|format(file.file_size / 1024) }} KB <span class="meta-dot">•</span> {{ "Google Drive · private file" if file.storage_provider == "google_drive" else "GitHub · public file" }} <span class="meta-dot">•</span> Uploaded <time data-format-date datetime="{{ file.upload_time }}">{{ file.upload_time }}</time></p>
         </div>
       </div>
       {% if status == "active" %}
@@ -88,7 +88,7 @@
     <article class="metric-card"><span class="metric-icon metric-mint" aria-hidden="true">◷</span><div><span class="metric-label">LINK EXPIRY</span><strong><time data-format-date datetime="{{ file.expiry_time }}">{{ file.expiry_time }}</time></strong><span class="metric-foot">Displayed in your local time</span></div></article>
     <article class="metric-card"><span class="metric-icon metric-violet" aria-hidden="true">↗</span><div><span class="metric-label">SHARE ID</span><strong class="share-id">{{ file.share_id[:8] }}…</strong><span class="metric-foot">Unique file reference</span></div></article>
   </section>
-  <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>About public storage</strong><p>This prototype stores files and share metadata in a public GitHub repository. Link expiry and download limits apply only through QuickShare; direct GitHub access may bypass them. Revocation blocks QuickShare downloads; cleanup removes the current-branch file but cannot erase Git history. Never upload sensitive files.</p></div></div>
+  <div class="storage-disclaimer"><span class="disclaimer-icon" aria-hidden="true">!</span><div><strong>{% if file.storage_provider == "google_drive" %}Private file storage · Public share metadata{% else %}Public GitHub file storage{% endif %}</strong><p>{% if file.storage_provider == "google_drive" %}The file contents are stored privately in Google Drive and are served through QuickShare after access checks. Share metadata such as filename, expiry and download count remains in the public GitHub repository. {% else %}The file itself is stored in a public GitHub repository, so direct repository access may bypass QuickShare's expiry and download limits. {% endif %}Revocation and expiry control downloads through QuickShare. Use non-sensitive filenames and files only.</p></div></div>
 </section>
 
 
