@@ -178,7 +178,7 @@
 
   function offsetFromRange(response) {
     const value = response.headers.get("Range") || response.headers.get("range") || "";
-    const match = value.match(/bytes[= ]\\d+-(\\d+)/i);
+    const match = value.match(/bytes[= ]\d+-(\d+)/i);
     return match ? Number(match[1]) + 1 : null;
   }
 
