@@ -8,7 +8,7 @@
   <meta name="csrf-token" content="{{ csrf_token() }}">
   <meta name="description" content="QuickShare Cloud — share small files with a QR code, expiring links and download controls.">
   <title>{% block title %}QuickShare Cloud{% endblock %}</title>
-  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='8') }}">
+  <link rel="stylesheet" href="{{ url_for('static', filename='css/app.css', v='9') }}">
 </head>
 <body>
   <div class="ambient ambient-a" aria-hidden="true"></div>
@@ -25,6 +25,7 @@
         <a href="{{ url_for('index') }}#how-it-works">How it works</a>
         {% if session.get('user') %}
           <a href="{{ url_for('my_shares') }}">My Shares</a>
+          {% if is_storage_admin %}<a href="{{ url_for('admin_storage') }}">Storage</a>{% endif %}
           <span class="account-chip" title="{{ session.get('user', {}).get('email', '') }}"><span class="account-avatar">{{ session.get('user', {}).get('name', 'Q')[:1]|upper }}</span><span class="account-name">{{ session.get('user', {}).get('name', 'Account') }}</span></span>
           <a class="nav-cta" href="{{ url_for('logout') }}">Sign out <span aria-hidden="true">↗</span></a>
         {% else %}
@@ -58,6 +59,6 @@
     </footer>
   </div>
   <div class="toast" id="toast" role="status" aria-live="polite"></div>
-  <script src="{{ url_for('static', filename='js/app.js', v='8') }}" defer></script>
+  <script src="{{ url_for('static', filename='js/app.js', v='9') }}" defer></script>
 </body>
 </html>
