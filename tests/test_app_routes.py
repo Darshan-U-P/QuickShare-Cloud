@@ -164,10 +164,10 @@ def test_cleanup_endpoint_requires_bearer_secret(monkeypatch):
 
 
 def test_storage_settings_page_is_admin_only(monkeypatch):
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "student@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     monkeypatch.setattr(app_module.google_drive_storage, "is_configured", lambda: False)
     client = app_module.app.test_client()
-    sign_in(client, base_url="https://adminqshare.darshanup.online")
+    sign_in(client, email="darshandileep4@gmail.com", base_url="https://adminqshare.darshanup.online")
     response = client.get("/admin/storage", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 200
     assert b"providers." in response.data
@@ -175,7 +175,9 @@ def test_storage_settings_page_is_admin_only(monkeypatch):
 
     other_client = app_module.app.test_client()
     sign_in(other_client, sub="other-subject", email="other@example.com", base_url="https://adminqshare.darshanup.online")
-    assert other_client.get("/admin/storage", base_url="https://adminqshare.darshanup.online").status_code == 403
+    other_response = other_client.get("/admin/storage", base_url="https://adminqshare.darshanup.online")
+    assert other_response.status_code == 403
+    assert b"You're not an admin" in other_response.data
 
 
 def test_upload_can_select_google_drive_provider(monkeypatch):
@@ -570,8 +572,8 @@ def test_upload_chunk_rejects_malformed_range_before_forwarding(monkeypatch):
 
 def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
     client = app_module.app.test_client()
-    sign_in(client, sub="storage-admin-sub", email="admin@example.com", base_url="https://adminqshare.darshanup.online")
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    sign_in(client, sub="storage-admin-sub", email="darshandileep4@gmail.com", base_url="https://adminqshare.darshanup.online")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     approved = set()
 
@@ -629,15 +631,16 @@ def test_admin_transfer_permissions_page_and_add_remove(monkeypatch):
 def test_transfer_permissions_admin_panel_rejects_non_admin(monkeypatch):
     client = app_module.app.test_client()
     sign_in(client, email="student@example.com", base_url="https://adminqshare.darshanup.online")
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 403
+    assert b"You're not an admin" in response.data
 
 
 def test_transfer_permissions_admin_panel_shows_private_store_error(monkeypatch):
     client = app_module.app.test_client()
-    sign_in(client, sub="storage-admin-sub", email="admin@example.com", base_url="https://adminqshare.darshanup.online")
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    sign_in(client, sub="storage-admin-sub", email="darshandileep4@gmail.com", base_url="https://adminqshare.darshanup.online")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
 
     def fail_read():
@@ -660,11 +663,11 @@ def test_admin_subdomain_root_opens_transfer_permissions():
 
 def test_admin_panel_is_hidden_on_public_quickshare_host(monkeypatch):
     client = app_module.app.test_client()
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     with client.session_transaction(base_url="https://qshare.darshanup.online") as saved:
         saved["user"] = {
             "sub": "admin-subject",
-            "email": "admin@example.com",
+            "email": "darshandileep4@gmail.com",
             "name": "Admin",
         }
         saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
@@ -674,16 +677,33 @@ def test_admin_panel_is_hidden_on_public_quickshare_host(monkeypatch):
 
 def test_admin_subdomain_accepts_storage_admin_session(monkeypatch):
     client = app_module.app.test_client()
-    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "admin@example.com")
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "darshandileep4@gmail.com")
     monkeypatch.setattr(app_module, "_drive_storage_ready", lambda: True)
     monkeypatch.setattr(app_module.google_drive_storage, "get_large_upload_allowlist", lambda: [])
     with client.session_transaction(base_url="https://adminqshare.darshanup.online") as saved:
         saved["user"] = {
             "sub": "admin-subject",
-            "email": "admin@example.com",
+            "email": "darshandileep4@gmail.com",
             "name": "Admin",
         }
         saved["_csrf_token"] = "csrf-test-token-which-is-long-enough"
     response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
     assert response.status_code == 200
     assert b"Large transfer" in response.data
+
+
+
+def test_admin_permission_is_hardcoded_and_not_overridden_by_storage_env(monkeypatch):
+    client = app_module.app.test_client()
+    sign_in(
+        client,
+        sub="unauthorized-admin-subject",
+        email="someone-else@example.com",
+        base_url="https://adminqshare.darshanup.online",
+    )
+    # A mistaken environment value must never grant admin rights to another account.
+    monkeypatch.setenv("STORAGE_ADMIN_EMAIL", "someone-else@example.com")
+    response = client.get("/admin/transfers", base_url="https://adminqshare.darshanup.online")
+    assert response.status_code == 403
+    assert b"You're not an admin" in response.data
+    assert b"someone-else@example.com" in response.data
