@@ -17,6 +17,7 @@ from flask import (
     Flask, abort, flash, jsonify, redirect, render_template, request,
     send_file, session, url_for,
 )
+from itsdangerous import BadSignature, SignatureExpired, URLSafeTimedSerializer
 
 from services import google_drive_storage
 from services.github_storage import (
@@ -73,6 +74,12 @@ EXPIRATION_OPTIONS = {
     "7d": ("7 days", timedelta(days=7)),
 }
 DOWNLOAD_LIMITS = {1, 3, 5, 10}
+MAX_GITHUB_UPLOAD_BYTES = 4 * 1024 * 1024
+MAX_STANDARD_UPLOAD_BYTES = 5 * 1024**3
+MAX_APPROVED_UPLOAD_BYTES = 50 * 1024**3
+DRIVE_UPLOAD_CHUNK_BYTES = 32 * 1024 * 1024
+UPLOAD_TICKET_MAX_AGE_SECONDS = 7 * 24 * 60 * 60
+TRANSFER_TICKET_MAX_AGE_SECONDS = max(60, int(os.getenv("TRANSFER_TICKET_MAX_AGE_SECONDS", "172800")))
 SHARE_ID_PATTERN = re.compile(r"^[a-f0-9]{32}$")
 EXTENSION_PATTERN = re.compile(r"^\.[a-zA-Z0-9]{1,10}$")
 BLOCKED_EXTENSIONS = {
@@ -186,6 +193,59 @@ def _is_storage_admin() -> bool:
     return bool(user and admin_email and user.get("email", "").strip().lower() == admin_email)
 
 
+def _large_upload_allowed() -> bool:
+    user = _current_user()
+    if not user:
+        return False
+    allowed = {
+        item.strip().lower()
+        for item in os.getenv("LARGE_UPLOAD_ALLOWED_EMAILS", "").split(",")
+        if item.strip()
+    }
+    email = str(user.get("email", "")).strip().lower()
+    return bool(email and email in allowed)
+
+
+def _large_transfer_ready() -> bool:
+    return bool(
+        os.getenv("TRANSFER_SERVICE_URL", "").strip()
+        and os.getenv("TRANSFER_TOKEN_SECRET", "").strip()
+    )
+
+
+def _upload_ticket_serializer():
+    return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="quickshare-drive-upload-v1")
+
+
+def _transfer_ticket_serializer():
+    secret = os.getenv("TRANSFER_TOKEN_SECRET", "").strip()
+    if not secret:
+        return None
+    return URLSafeTimedSerializer(secret, salt="quickshare-transfer-v1")
+
+
+def _transfer_download_url(file_record: dict) -> str:
+    base = os.getenv("TRANSFER_SERVICE_URL", "").strip().rstrip("/")
+    serializer = _transfer_ticket_serializer()
+    if not base or not serializer:
+        raise StorageError("Large-file downloads are not configured yet. The administrator must configure the transfer service.")
+    try:
+        size = int(file_record.get("file_size", 0))
+    except (TypeError, ValueError):
+        size = 0
+    if size < 1 or size > MAX_APPROVED_UPLOAD_BYTES:
+        raise StorageError("This file size is outside the supported large-transfer range.")
+    payload = {
+        "jti": secrets.token_hex(16),
+        "share_id": str(file_record.get("share_id", "")),
+        "file_id": str(file_record.get("drive_file_id", "")),
+        "filename": str(file_record.get("original_filename", "download.bin"))[:200],
+        "size": size,
+    }
+    token = serializer.dumps(payload)
+    return f"{base}/download/{token}"
+
+
 def _drive_storage_ready() -> bool:
     return google_drive_storage.is_configured()
 
@@ -210,6 +270,9 @@ def inject_storage_settings():
     return {
         "is_storage_admin": _is_storage_admin(),
         "google_drive_storage_ready": _drive_storage_ready(),
+        "large_upload_allowed": _large_upload_allowed(),
+        "upload_limit_gb": 50 if _large_upload_allowed() else 5,
+        "large_transfer_ready": _large_transfer_ready(),
     }
 
 
@@ -353,6 +416,144 @@ def google_drive_callback():
 @app.get("/health")
 def health():
     return {"status": "ok", "service": "QuickShare Cloud"}
+
+
+@app.post("/api/uploads/initiate")
+@login_required
+def api_upload_initiate():
+    data = request.get_json(silent=True) or {}
+    original_name = str(data.get("filename", "")).replace("\\", "/").split("/")[-1].strip()[:200]
+    if not original_name:
+        return jsonify({"error": "Choose a valid filename."}), 400
+    suffix = Path(original_name).suffix.lower()
+    if suffix in BLOCKED_EXTENSIONS:
+        return jsonify({"error": "That file type is not accepted."}), 400
+    if suffix and not EXTENSION_PATTERN.fullmatch(suffix):
+        return jsonify({"error": "The file extension is invalid."}), 400
+
+    try:
+        file_size = int(data.get("file_size", 0))
+        max_downloads = int(data.get("max_downloads", 3))
+    except (TypeError, ValueError):
+        return jsonify({"error": "Invalid file size or download limit."}), 400
+    if file_size <= 0:
+        return jsonify({"error": "Empty files cannot be uploaded."}), 400
+    limit_bytes = MAX_APPROVED_UPLOAD_BYTES if _large_upload_allowed() else MAX_STANDARD_UPLOAD_BYTES
+    if file_size > limit_bytes:
+        limit_gb = 50 if _large_upload_allowed() else 5
+        return jsonify({"error": f"This account can upload files up to {limit_gb} GB."}), 413
+    if max_downloads not in DOWNLOAD_LIMITS:
+        return jsonify({"error": "Choose a valid download limit."}), 400
+    expiry_choice = str(data.get("expiry", "24h"))
+    if expiry_choice not in EXPIRATION_OPTIONS:
+        return jsonify({"error": "Choose a valid expiration period."}), 400
+    if str(data.get("storage_provider", "google_drive")).strip().lower() != "google_drive":
+        return jsonify({"error": "Resumable large uploads require Google Drive storage."}), 400
+    if not _drive_storage_ready():
+        return jsonify({"error": "Google Drive storage is not connected."}), 503
+    if file_size > MAX_GITHUB_UPLOAD_BYTES and not _large_transfer_ready():
+        return jsonify({"error": "Large files need the streaming transfer service configured before upload. Ask the administrator to finish transfer-service setup."}), 503
+
+    user = _current_user()
+    owner_id_hash = _current_owner_hash()
+    if not user or not owner_id_hash:
+        return jsonify({"error": "Sign in again before uploading."}), 401
+    share_id = secrets.token_hex(16)
+    upload_nonce = secrets.token_hex(16)
+    storage_path = f"files/{share_id}{suffix or '.bin'}"
+    label, duration = EXPIRATION_OPTIONS[expiry_choice]
+    now = datetime.now(timezone.utc)
+    mime_type = str(data.get("mime_type") or mimetypes.guess_type(original_name)[0] or "application/octet-stream")[:120]
+    metadata = {
+        "share_id": share_id,
+        "original_filename": original_name,
+        "storage_path": storage_path,
+        "storage_provider": "google_drive",
+        "file_size": file_size,
+        "upload_time": now.isoformat(timespec="seconds"),
+        "expiry_time": (now + duration).isoformat(timespec="seconds"),
+        "max_downloads": max_downloads,
+        "download_count": 0,
+        "downloads": [],
+        "owner_id_hash": owner_id_hash,
+        "revoked": False,
+        "cleanup_status": "pending",
+    }
+    upload_ticket_data = {"metadata": metadata, "upload_nonce": upload_nonce}
+    try:
+        session_uri = google_drive_storage.initiate_resumable_upload(
+            storage_path=storage_path,
+            share_id=share_id,
+            upload_nonce=upload_nonce,
+            file_size=file_size,
+            mime_type=mime_type,
+        )
+    except StorageError as exc:
+        app.logger.warning("Could not start resumable Drive upload: %s", exc)
+        return jsonify({"error": str(exc)}), 502
+
+    upload_ticket = _upload_ticket_serializer().dumps(upload_ticket_data)
+    return jsonify({
+        "upload_session_url": session_uri,
+        "upload_ticket": upload_ticket,
+        "chunk_size": DRIVE_UPLOAD_CHUNK_BYTES,
+        "file_size": file_size,
+        "share_id": share_id,
+    })
+
+
+@app.post("/api/uploads/finalize")
+@login_required
+def api_upload_finalize():
+    data = request.get_json(silent=True) or {}
+    upload_ticket = data.get("upload_ticket", "")
+    drive_file_id = data.get("drive_file_id", "")
+    if not isinstance(upload_ticket, str) or not isinstance(drive_file_id, str) or not drive_file_id.strip():
+        return jsonify({"error": "Missing upload ticket or completed Drive file ID."}), 400
+    try:
+        ticket_data = _upload_ticket_serializer().loads(
+            upload_ticket, max_age=UPLOAD_TICKET_MAX_AGE_SECONDS
+        )
+    except SignatureExpired:
+        return jsonify({"error": "This upload session expired. Start the upload again."}), 410
+    except BadSignature:
+        return jsonify({"error": "This upload ticket is invalid."}), 400
+
+    metadata = ticket_data.get("metadata") if isinstance(ticket_data, dict) else None
+    upload_nonce = ticket_data.get("upload_nonce", "") if isinstance(ticket_data, dict) else ""
+    if not isinstance(metadata, dict) or not isinstance(upload_nonce, str):
+        return jsonify({"error": "The upload ticket is invalid."}), 400
+    current_owner_hash = _current_owner_hash()
+    expected_owner_hash = str(metadata.get("owner_id_hash", ""))
+    if not current_owner_hash or not hmac.compare_digest(current_owner_hash, expected_owner_hash):
+        return jsonify({"error": "This upload belongs to another signed-in account."}), 403
+    try:
+        verified_file = google_drive_storage.verify_resumable_upload(
+            drive_file_id.strip(),
+            share_id=str(metadata["share_id"]),
+            upload_nonce=upload_nonce,
+            expected_size=int(metadata["file_size"]),
+        )
+        metadata["drive_file_id"] = verified_file["id"]
+        already_saved = get_share_metadata(metadata["share_id"])
+        if already_saved:
+            if (
+                already_saved.get("drive_file_id") != metadata["drive_file_id"]
+                or already_saved.get("owner_id_hash") != expected_owner_hash
+            ):
+                return jsonify({"error": "A different file is already registered for this upload."}), 409
+        else:
+            create_share_metadata(metadata)
+    except StorageError as exc:
+        app.logger.warning("Could not finalize resumable Drive upload: %s", exc)
+        return jsonify({"error": str(exc)}), 502
+    except (KeyError, TypeError, ValueError):
+        return jsonify({"error": "The completed upload metadata is invalid."}), 400
+    return jsonify({
+        "status": "success",
+        "share_id": metadata["share_id"],
+        "share_url": url_for("share_page", share_id=metadata["share_id"]),
+    })
 
 
 @app.post("/upload")
@@ -514,6 +715,23 @@ def download(share_id: str):
     if status != "active":
         record_rejected_attempt(share_id, status)
         return redirect(url_for("share_page", share_id=share_id, error=status))
+
+    is_drive_file = file_record.get("storage_provider", "github") == "google_drive"
+    try:
+        file_size = int(file_record.get("file_size", 0))
+    except (TypeError, ValueError):
+        file_size = 0
+
+    if is_drive_file and file_size > MAX_GITHUB_UPLOAD_BYTES:
+        try:
+            transfer_url = _transfer_download_url(file_record)
+            result = record_download(share_id)
+        except StorageError as exc:
+            app.logger.warning("Large download setup failed for share %s: %s", share_id, exc)
+            return redirect(url_for("share_page", share_id=share_id, error="transfer"))
+        if result != "success":
+            return redirect(url_for("share_page", share_id=share_id, error=result))
+        return redirect(transfer_url, code=302)
 
     try:
         content = download_share_file(file_record)
