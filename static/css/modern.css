@@ -237,3 +237,26 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; }
 }
+
+
+/* Chunked-transfer progress states */
+.upload-progress {
+  display: grid;
+  gap: 11px;
+  margin-top: 18px;
+  padding: 18px;
+  border: 1px solid rgba(138, 239, 220, .22);
+  border-radius: 17px;
+  background: linear-gradient(135deg, rgba(26, 62, 73, .22), rgba(14, 25, 46, .55));
+}
+.upload-progress[hidden] { display: none !important; }
+.upload-progress-heading { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.upload-progress-heading strong { color: #eaf4ff; font-size: 13px; }
+.upload-progress-heading span { color: var(--qs-mint); font-size: 12px; font-variant-numeric: tabular-nums; font-weight: 850; }
+.upload-progress-track { height: 9px; overflow: hidden; border-radius: 999px; background: rgba(154, 176, 221, .14); }
+.upload-progress-track span { display: block; width: 0; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #91a7ff, #78ead7); transition: width .16s linear; }
+.upload-progress p { margin: 0; color: #9eafd0; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+@media (max-width: 700px) {
+  .upload-progress { padding: 14px; border-radius: 14px; }
+  .upload-progress-heading strong { font-size: 12px; }
+}
