@@ -4,6 +4,7 @@ import re
 import secrets
 import time
 from threading import Lock
+from datetime import datetime, timezone
 from urllib.parse import quote
 
 import requests
@@ -18,6 +19,8 @@ class GoogleDriveStorageError(StorageError):
 DRIVE_API = "https://www.googleapis.com/drive/v3"
 DRIVE_UPLOAD_API = "https://www.googleapis.com/upload/drive/v3"
 FOLDER_NAME = "QuickShare Cloud Storage"
+LARGE_UPLOAD_CONFIG_KEY = "large_upload_allowlist_v1"
+LARGE_UPLOAD_CONFIG_NAME = "QuickShare Cloud - Large Transfer Permissions.json"
 _TOKEN_CACHE = {"value": "", "expires_at": 0.0}
 _TOKEN_LOCK = Lock()
 _FOLDER_CACHE = {"id": ""}
@@ -161,6 +164,128 @@ def _ensure_folder() -> str:
             return _FOLDER_CACHE["id"]
         except (ValueError, KeyError, TypeError) as exc:
             raise GoogleDriveStorageError("Google Drive did not return the new folder ID.") from exc
+
+
+
+def _large_upload_config_file() -> dict | None:
+    folder_id = _ensure_folder()
+    query = (
+        f"'{folder_id}' in parents and "
+        f"appProperties has {{ key='quickshareConfigKey' and value='{LARGE_UPLOAD_CONFIG_KEY}' }} and "
+        "trashed = false"
+    )
+    files = _list_files(query, fields="files(id,name,mimeType,size,appProperties)")
+    return files[0] if files else None
+
+
+def get_large_upload_allowlist() -> list[str]:
+    """Read approved 50 GB account emails from a private app-owned Drive config file."""
+    config_file = _large_upload_config_file()
+    if not config_file:
+        return []
+    file_id = str(config_file.get("id", "")).strip()
+    if not file_id:
+        raise GoogleDriveStorageError("The private large-transfer permissions file is missing its ID.")
+    try:
+        response = requests.get(
+            f"{DRIVE_API}/files/{quote(file_id, safe='')}",
+            headers=_headers(),
+            params={"alt": "media"},
+            timeout=20,
+        )
+    except requests.RequestException as exc:
+        raise GoogleDriveStorageError("Could not read private large-transfer permissions from Drive.") from exc
+    _raise_for_response(response, "reading large-transfer permissions")
+    try:
+        raw = getattr(response, "content", b"")
+        if not raw:
+            raw = (getattr(response, "text", "") or "").encode("utf-8")
+        payload = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError, TypeError) as exc:
+        raise GoogleDriveStorageError("The private large-transfer permissions file is invalid.") from exc
+    emails = payload.get("approved_emails") if isinstance(payload, dict) else None
+    if not isinstance(emails, list):
+        raise GoogleDriveStorageError("The private large-transfer permissions list is invalid.")
+    normalized = set()
+    for value in emails:
+        if not isinstance(value, str):
+            continue
+        email = value.strip().lower()
+        if email and len(email) <= 254 and re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+            normalized.add(email)
+    return sorted(normalized)
+
+
+def set_large_upload_allowlist(emails: list[str]) -> list[str]:
+    """Store the full approved-email allowlist privately in the app's Drive folder."""
+    normalized = set()
+    for value in emails:
+        if not isinstance(value, str):
+            continue
+        email = value.strip().lower()
+        if not email or len(email) > 254 or not re.fullmatch(r"[^@\\s]+@[^@\\s]+\\.[^@\\s]+", email):
+            raise GoogleDriveStorageError("One of the approved email addresses is invalid.")
+        normalized.add(email)
+    approved = sorted(normalized)
+    payload = json.dumps(
+        {
+            "version": 1,
+            "approved_emails": approved,
+            "updated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+        },
+        ensure_ascii=False,
+        indent=2,
+    ).encode("utf-8")
+    config_file = _large_upload_config_file()
+    if config_file:
+        file_id = str(config_file.get("id", "")).strip()
+        if not file_id:
+            raise GoogleDriveStorageError("The private large-transfer permissions file is missing its ID.")
+        try:
+            response = requests.patch(
+                f"{DRIVE_UPLOAD_API}/files/{quote(file_id, safe='')}",
+                headers={**_headers(), "Content-Type": "application/json; charset=UTF-8"},
+                params={"uploadType": "media"},
+                data=payload,
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            raise GoogleDriveStorageError("Could not update private large-transfer permissions in Drive.") from exc
+        _raise_for_response(response, "updating large-transfer permissions")
+    else:
+        folder_id = _ensure_folder()
+        boundary = "quickshare_config_" + secrets.token_hex(12)
+        metadata = {
+            "name": LARGE_UPLOAD_CONFIG_NAME,
+            "mimeType": "application/json",
+            "parents": [folder_id],
+            "appProperties": {"quickshareConfigKey": LARGE_UPLOAD_CONFIG_KEY},
+        }
+        body = (
+            f"--{boundary}\\r\\n"
+            "Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n"
+            + json.dumps(metadata, separators=(",", ":"))
+            + f"\\r\\n--{boundary}\\r\\n"
+            "Content-Type: application/json; charset=UTF-8\\r\\n\\r\\n"
+        ).encode("utf-8") + payload + f"\\r\\n--{boundary}--\\r\\n".encode("utf-8")
+        try:
+            response = requests.post(
+                f"{DRIVE_UPLOAD_API}/files",
+                headers={**_headers(), "Content-Type": f"multipart/related; boundary={boundary}"},
+                params={"uploadType": "multipart", "fields": "id,name,mimeType,appProperties"},
+                data=body,
+                timeout=20,
+            )
+        except requests.RequestException as exc:
+            raise GoogleDriveStorageError("Could not create private large-transfer permissions in Drive.") from exc
+        _raise_for_response(response, "creating large-transfer permissions")
+        try:
+            if not response.json().get("id"):
+                raise KeyError("id")
+        except (ValueError, KeyError, TypeError, AttributeError) as exc:
+            raise GoogleDriveStorageError("Google Drive did not return the private permissions file ID.") from exc
+    return approved
+
 
 
 def upload_file_bytes(storage_path: str, content: bytes, share_id: str) -> dict:
