@@ -25,6 +25,8 @@ def transfer_test_setup(monkeypatch, tmp_path):
         "a-unit-test-transfer-secret-long-enough", salt="quickshare-transfer-v1"
     ))
     monkeypatch.setattr(transfer_service, "TOKEN_MAX_AGE", 3600)
+    monkeypatch.setattr(transfer_service, "TRANSFER_WEB_BASE_URL", "https://quickshare.test")
+    monkeypatch.setattr(transfer_service, "_validate_with_web", lambda _token: None)
     monkeypatch.setattr(transfer_service, "DB_PATH", tmp_path / "transfer.sqlite3")
     monkeypatch.setattr(transfer_service.google_drive_storage, "is_configured", lambda: True)
     return transfer_service.app.test_client()
