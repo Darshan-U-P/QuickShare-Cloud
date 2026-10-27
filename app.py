@@ -297,7 +297,8 @@ def _download_ticket_serializer():
     )
 
 
-def _parse_share_expiry(metadata: dict) -> datetime:    expiry = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
+def _parse_share_expiry(metadata: dict) -> datetime:
+    expiry = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     return expiry
@@ -608,7 +609,8 @@ def connect_google_drive():
 def google_drive_callback():
     if not session.pop("drive_connect_pending", False):
         abort(403)
-    if not _is_storage_admin():        return _not_admin_response()
+    if not _is_storage_admin():
+        return _not_admin_response()
     try:
         token = oauth.google_drive.authorize_access_token()
         userinfo = token.get("userinfo")
@@ -1206,7 +1208,8 @@ def api_share_analytics(share_id: str):
     return jsonify(analytics)
 
 
-@app.post("/api/shares/<share_id>/revoke")@login_required
+@app.post("/api/shares/<share_id>/revoke")
+@login_required
 def api_revoke_share(share_id: str):
     if not SHARE_ID_PATTERN.fullmatch(share_id):
         abort(404)
