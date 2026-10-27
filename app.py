@@ -297,8 +297,7 @@ def _download_ticket_serializer():
     )
 
 
-def _parse_share_expiry(metadata: dict) -> datetime:
-    expiry = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
+def _parse_share_expiry(metadata: dict) -> datetime:    expiry = datetime.fromisoformat(str(metadata.get("expiry_time", "")))
     if expiry.tzinfo is None:
         expiry = expiry.replace(tzinfo=timezone.utc)
     return expiry
@@ -409,6 +408,18 @@ def add_security_headers(response):
     else:
         response.headers.setdefault("Cache-Control", "no-store")
     return response
+
+
+@app.get("/privacy-policy")
+def privacy_policy():
+    """Public privacy disclosure for Google OAuth and QuickShare data handling."""
+    return render_template("privacy_policy.html")
+
+
+@app.get("/terms")
+def terms_of_service():
+    """Public terms of service for QuickShare Cloud."""
+    return render_template("terms.html")
 
 
 @app.get("/")
@@ -597,8 +608,7 @@ def connect_google_drive():
 def google_drive_callback():
     if not session.pop("drive_connect_pending", False):
         abort(403)
-    if not _is_storage_admin():
-        return _not_admin_response()
+    if not _is_storage_admin():        return _not_admin_response()
     try:
         token = oauth.google_drive.authorize_access_token()
         userinfo = token.get("userinfo")
@@ -897,8 +907,7 @@ def upload():
         return redirect(url_for("index"))
 
     storage_provider = request.form.get(
-        "storage_provider",
-        "google_drive" if _drive_storage_ready() else "github",
+        "storage_provider",        "google_drive" if _drive_storage_ready() else "github",
     ).strip().lower()
     if storage_provider not in {"github", "google_drive"}:
         flash("Choose a valid storage provider.", "error")
@@ -1197,8 +1206,7 @@ def api_share_analytics(share_id: str):
     return jsonify(analytics)
 
 
-@app.post("/api/shares/<share_id>/revoke")
-@login_required
+@app.post("/api/shares/<share_id>/revoke")@login_required
 def api_revoke_share(share_id: str):
     if not SHARE_ID_PATTERN.fullmatch(share_id):
         abort(404)
