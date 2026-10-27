@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}Terms of Service · QuickShare Cloud{% endblock %}
+{% block content %}
+<article class="hero legal-page">
+  <div class="eyebrow"><span class="eyebrow-dot"></span> Legal</div>
+  <h1>Terms of <span>Service.</span></h1>
+  <p class="hero-lede">Last updated: October 28, 2026</p>
+
+  <p>These Terms of Service ("Terms") apply when you access or use QuickShare Cloud ("QuickShare", "we", "us", or "our"). By using the service, you agree to these Terms. If you do not agree, do not use QuickShare.</p>
+
+  <h2>1. What the service does</h2>
+  <p>QuickShare lets users upload files, create share links and QR codes, and configure available expiry periods and download limits. Availability and limits depend on the application, storage provider, browser, and infrastructure. Advertised per-file limits are application limits, not a guarantee of unlimited storage, bandwidth, or uninterrupted service.</p>
+
+  <h2>2. Your files and responsibilities</h2>
+  <p>You must own or have permission to upload and share each file. You are responsible for the content you upload, the recipients you share it with, your chosen settings, and compliance with applicable laws. Do not upload or share unlawful content, malware, files that infringe another person's rights, or content that violates privacy or confidentiality obligations.</p>
+
+  <h2>3. Storage choices and public visibility</h2>
+  <p>Google Drive storage is designed to keep file contents private in the connected administrator's Drive and deliver them through QuickShare's access checks. The service may rely on a centrally configured storage account; it is not your personal Google Drive account.</p>
+  <p>The optional GitHub storage provider stores file contents in a public repository. Share metadata is also stored in a public GitHub repository in the current deployment. Anyone may be able to access GitHub-hosted file bytes or metadata directly, even after a QuickShare link expires or is revoked. Do not use GitHub storage for private, confidential, or sensitive files.</p>
+
+  <h2>4. Links, expiry, and downloads</h2>
+  <p>Share links may expire, be revoked, or become unavailable when the configured download limit is reached. Expiry and revocation control access through QuickShare; they cannot erase files already downloaded, copied, cached, or accessed through a public storage URL. Scheduled cleanup may take time, and we do not guarantee immediate physical deletion.</p>
+
+  <h2>5. Acceptable use</h2>
+  <p>You may not attempt to bypass authentication, access controls, expiry or download limits; interfere with the service; probe or exploit systems without authorization; distribute malware; misuse another person's account; or use the service in a way that violates law or third-party rights.</p>
+
+  <h2>6. Third-party services</h2>
+  <p>QuickShare depends on third-party services such as Google, GitHub, and Vercel. Their availability, quotas, policies, and terms can affect the service. Your use of those services may also be subject to their own terms. We are not responsible for outages or changes controlled by those providers.</p>
+
+  <h2>7. Availability and changes</h2>
+  <p>QuickShare is provided on an "as available" basis. Features, storage options, file-size limits, and supported browsers may change. We may suspend or restrict access to protect the service, comply with law, or address abuse. Keep your own copies of important files; do not rely on QuickShare as your only backup.</p>
+
+  <h2>8. Disclaimer and limitation</h2>
+  <p>To the extent permitted by applicable law, QuickShare is provided without warranties of uninterrupted availability, error-free operation, or suitability for a particular purpose. To the extent permitted by law, the service operator will not be liable for indirect or consequential loss arising from use of the service, loss of access, third-party outages, or files shared by users. Nothing in these Terms excludes liability that cannot legally be excluded.</p>
+
+  <h2>9. Changes to these Terms</h2>
+  <p>We may revise these Terms as the service evolves. The latest version will be published on this page with its updated date. Continued use after a revision takes effect constitutes acceptance of the revised Terms to the extent permitted by law.</p>
+
+  <h2>10. Contact</h2>
+  <p>For questions about these Terms, contact the service operator through the support email shown on the Google OAuth consent screen.</p>
+</article>
+{% endblock %}
