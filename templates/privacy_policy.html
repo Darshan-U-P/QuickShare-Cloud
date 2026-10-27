@@ -1,0 +1,47 @@
+{% extends "base.html" %}
+{% block title %}Privacy Policy · QuickShare Cloud{% endblock %}
+{% block content %}
+<article class="hero legal-page">
+  <div class="eyebrow"><span class="eyebrow-dot"></span> Legal</div>
+  <h1>Privacy <span>Policy.</span></h1>
+  <p class="hero-lede">Last updated: October 28, 2026</p>
+
+  <p>QuickShare Cloud ("QuickShare", "we", "us", or "our") provides file sharing through expiring links and QR codes. This policy explains what information the service handles and how it is used.</p>
+
+  <h2>1. Information we handle</h2>
+  <ul>
+    <li><strong>Google account information:</strong> when you sign in, Google provides account identifiers and basic profile information such as your email address, name, profile image, and verified-email status. We use this information to authenticate you and associate your shares with your account.</li>
+    <li><strong>Files and share settings:</strong> the file you choose to upload, its filename and size, upload time, expiry setting, download limit, download count, and share status.</li>
+    <li><strong>Technical and security data:</strong> information processed by the hosting platform and application to operate the service, protect routes, validate requests, and troubleshoot errors. Hosting or infrastructure providers may generate their own operational logs under their policies.</li>
+  </ul>
+
+  <h2>2. Google sign-in and Google Drive</h2>
+  <p>Google sign-in is used to authenticate users. When the storage administrator connects Google Drive, QuickShare requests the Google Drive <code>drive.file</code> permission for its file-storage workflow. The server uses the administrator-authorized connection to create, verify, read, and delete files that QuickShare manages in its configured Drive storage. Recipients access private Drive-stored files through QuickShare's share checks; QuickShare does not intentionally make those Drive files public.</p>
+  <p>Google data is used to provide and secure the features described here, not to sell advertising or build advertising profiles. QuickShare does not sell Google user data. Access tokens and refresh tokens are server-side credentials and should not be published or shared. Google's processing of account data is also subject to <a href="https://policies.google.com/privacy" target="_blank" rel="noopener noreferrer">Google's Privacy Policy</a>.</p>
+
+  <h2>3. Where files and metadata are stored</h2>
+  <ul>
+    <li><strong>Google Drive storage:</strong> file contents are stored in the private Drive folder configured by the storage administrator. QuickShare uses server-side access checks before serving a shared file.</li>
+    <li><strong>GitHub storage:</strong> if a file is stored using the GitHub option, the file contents are public in the configured repository. Do not upload confidential or sensitive files using this option.</li>
+    <li><strong>Share metadata:</strong> the current deployment stores share metadata in a public GitHub repository. This may include the filename, size, storage provider/reference, upload and expiry times, download limits/counts, revocation/cleanup status, and a keyed owner identifier. Avoid sensitive information in filenames or other share metadata.</li>
+  </ul>
+
+  <h2>4. How we use information</h2>
+  <p>We use information to authenticate users, associate shares with their owners, store and deliver files, enforce expiry and download limits, allow share revocation, perform cleanup, prevent abuse, protect the service, and diagnose operational failures.</p>
+
+  <h2>5. Sharing and service providers</h2>
+  <p>Recipients who have a valid share link can access the information intentionally exposed by that share. GitHub-hosted files and repository metadata are public as described above. We also rely on infrastructure and service providers, including Vercel, Google, and GitHub, to host the application, authenticate accounts, and store or deliver files. Those providers process information as necessary to provide their services and under their own terms and policies.</p>
+
+  <h2>6. Retention and deletion</h2>
+  <p>Share links become unavailable when they expire, reach their download limit, or are revoked, as applicable. The service runs scheduled cleanup for expired files, but physical deletion may not be immediate. Public GitHub copies or metadata may remain directly accessible until removed from the repository; revoking or expiring a QuickShare link cannot guarantee removal of copies someone has already downloaded or accessed. Google Drive files managed by QuickShare are subject to the service's cleanup process and the connected account's settings.</p>
+
+  <h2>7. Security</h2>
+  <p>QuickShare uses authentication, server-side authorization checks, request security controls, and signed, time-limited transfer tickets where applicable. No online service can guarantee absolute security. Do not upload illegal content or files you are not authorized to share, and do not publish credentials or confidential data in filenames or public storage.</p>
+
+  <h2>8. Your choices and contact</h2>
+  <p>You can choose whether to sign in, which files to upload, which storage option to use where available, and the expiry and download limits offered by the application. To ask a privacy question or request help regarding information handled by QuickShare, contact the service operator through the support email shown on the Google OAuth consent screen.</p>
+
+  <h2>9. Changes to this policy</h2>
+  <p>We may update this policy as the service changes. The latest version will be published on this page with its updated date.</p>
+</article>
+{% endblock %}
